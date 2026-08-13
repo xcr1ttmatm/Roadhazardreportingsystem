@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+
+body {
+  background-color: #FFFFFF;
+  color: #0F4C81;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Leaflet map container needs an explicit height or it renders collapsed */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  border-radius: 0.5rem;
+}
