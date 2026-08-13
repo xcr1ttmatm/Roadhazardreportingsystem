@@ -1,16 +1,15 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
-import { ShieldAlert, LayoutDashboard, FilePlus, ListChecks, Map, LogOut } from 'lucide-react'
+import { ShieldAlert, LayoutDashboard, ClipboardList, Users, Map, LogOut } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
-import NotificationBell from '../components/NotificationBell'
 
 const navItems = [
-  { to: '/citizen', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/citizen/report/new', label: 'Submit Report', icon: FilePlus },
-  { to: '/citizen/reports', label: 'My Reports', icon: ListChecks },
-  { to: '/citizen/map', label: 'Hazard Map', icon: Map },
+  { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
+  { to: '/admin/reports', label: 'Reports', icon: ClipboardList },
+  // { to: '/admin/inspectors', label: 'Inspectors', icon: Users },  // added in Module 10
+  // { to: '/admin/map', label: 'Hazard Map', icon: Map },           // reuse citizen map later
 ]
 
-export default function CitizenLayout() {
+export default function AdminLayout() {
   const { profile, signOut } = useAuth()
   const location = useLocation()
 
@@ -23,11 +22,11 @@ export default function CitizenLayout() {
       <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FCD116]">
-              <ShieldAlert className="h-4 w-4 text-[#0F4C81]" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0F4C81]">
+              <ShieldAlert className="h-4 w-4 text-[#FCD116]" />
             </div>
             <span className="truncate text-xs font-semibold tracking-wide text-[#0F4C81] sm:text-sm">
-              Road Hazard Reporting
+              LGU Admin Console
             </span>
           </div>
 
@@ -47,7 +46,6 @@ export default function CitizenLayout() {
           </nav>
 
           <div className="flex items-center gap-3">
-            <NotificationBell />
             <span className="hidden text-sm text-gray-500 sm:inline">Hi, {profile?.username}</span>
             <button
               onClick={signOut}
@@ -59,7 +57,6 @@ export default function CitizenLayout() {
           </div>
         </div>
 
-        {/* mobile nav row */}
         <nav className="flex items-center gap-1 overflow-x-auto border-t border-gray-100 px-4 py-2 sm:hidden">
           {navItems.map((item) => (
             <Link

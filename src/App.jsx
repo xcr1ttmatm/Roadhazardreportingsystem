@@ -8,8 +8,13 @@ import Register from './pages/Register'
 import CitizenLayout from './pages/CitizenLayout'
 import CitizenDashboard from './pages/CitizenDashboard'
 import SubmitReport from './pages/SubmitReport'
-import InspectorDashboard from './pages/InspectorDashboard'
+import TrackReports from './pages/TrackReports'
+import HazardMap from './pages/HazardMap'
+import AdminLayout from './pages/AdminLayout'
 import AdminDashboard from './pages/AdminDashboard'
+import MonitorReports from './pages/MonitorReports'
+import ReportDetail from './pages/ReportDetail'
+import InspectorDashboard from './pages/InspectorDashboard'
 
 function HomeRedirect() {
   const { user, profile, loading } = useAuth()
@@ -40,6 +45,8 @@ export default function App() {
           >
             <Route index element={<CitizenDashboard />} />
             <Route path="report/new" element={<SubmitReport />} />
+            <Route path="reports" element={<TrackReports />} />
+            <Route path="map" element={<HazardMap />} />
           </Route>
 
           <Route
@@ -52,13 +59,17 @@ export default function App() {
           />
 
           <Route
-            path="/admin/*"
+            path="/admin"
             element={
               <ProtectedRoute allowedRoles={['admin']}>
-                <AdminDashboard />
+                <AdminLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="reports" element={<MonitorReports />} />
+            <Route path="reports/:reportId" element={<ReportDetail />} />
+          </Route>
         </Routes>
       </AuthProvider>
     </BrowserRouter>

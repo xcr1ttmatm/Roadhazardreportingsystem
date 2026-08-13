@@ -26,21 +26,31 @@ export default function CitizenDashboard() {
           </p>
         </Link>
 
-        <div className="rounded-2xl border border-dashed border-gray-200 bg-white/50 p-6 opacity-60">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-100">
-            <ListChecks className="h-5 w-5 text-gray-400" />
+        <Link
+          to="/citizen/reports"
+          className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+        >
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0F4C81]/10">
+            <ListChecks className="h-5 w-5 text-[#0F4C81]" />
           </div>
-          <h2 className="mt-4 font-semibold text-gray-400">Track My Reports</h2>
-          <p className="mt-1 text-sm text-gray-400">Coming in the next module.</p>
-        </div>
+          <h2 className="mt-4 font-semibold text-[#0F4C81]">Track My Reports</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Check the status of hazards you've reported and see updates.
+          </p>
+        </Link>
 
-        <div className="rounded-2xl border border-dashed border-gray-200 bg-white/50 p-6 opacity-60">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-100">
-            <Map className="h-5 w-5 text-gray-400" />
+        <Link
+          to="/citizen/map"
+          className="group rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-lg"
+        >
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#0F4C81]/10">
+            <Map className="h-5 w-5 text-[#0F4C81]" />
           </div>
-          <h2 className="mt-4 font-semibold text-gray-400">Hazard Map</h2>
-          <p className="mt-1 text-sm text-gray-400">Coming in the next module.</p>
-        </div>
+          <h2 className="mt-4 font-semibold text-[#0F4C81]">Hazard Map</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            View all LGU-verified road hazards across Iligan City.
+          </p>
+        </Link>
       </div>
     </div>
   )
