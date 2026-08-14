@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { ImagePlus, LocateFixed, Send } from 'lucide-react'
+import { ImagePlus, LocateFixed, Send, X } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
@@ -42,17 +42,38 @@ export default function SubmitReport() {
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [imageFile, setImageFile] = useState(null)
-  const [imagePreview, setImagePreview] = useState(null)
+  const [imageFiles, setImageFiles] = useState([])
+  const [imagePreviews, setImagePreviews] = useState([])
   const [position, setPosition] = useState(null)
   const [locating, setLocating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
+  const MAX_IMAGES = 5
+
   function handleImageChange(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setImageFile(file)
-    setImagePreview(URL.createObjectURL(file))
+    const newFiles = Array.from(e.target.files || [])
+    if (newFiles.length === 0) return
+
+    const remainingSlots = MAX_IMAGES - imageFiles.length
+    if (remainingSlots <= 0) {
+      toast.error(`Maximum ${MAX_IMAGES} photos allowed`)
+      e.target.value = ''
+      return
+    }
+
+    const filesToAdd = newFiles.slice(0, remainingSlots)
+    if (newFiles.length > remainingSlots) {
+      toast.error(`Only ${remainingSlots} more photo${remainingSlots === 1 ? '' : 's'} allowed (max ${MAX_IMAGES})`)
+    }
+
+    setImageFiles((prev) => [...prev, ...filesToAdd])
+    setImagePreviews((prev) => [...prev, ...filesToAdd.map((f) => URL.createObjectURL(f))])
+    e.target.value = '' // allows re-selecting the same file later if removed
+  }
+
+  function removeImage(index) {
+    setImageFiles((prev) => prev.filter((_, i) => i !== index))
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
   function handleUseCurrentLocation() {
@@ -78,7 +99,7 @@ export default function SubmitReport() {
 
     if (!description.trim()) return toast.error('Please describe the hazard')
     if (!position) return toast.error('Please pin the hazard location on the map')
-    if (!imageFile) return toast.error('Please upload a photo of the hazard')
+    if (imageFiles.length === 0) return toast.error('Please upload at least one photo of the hazard')
 
     setSubmitting(true)
 
@@ -98,22 +119,25 @@ export default function SubmitReport() {
 
       if (reportError) throw reportError
 
-      // 2. Upload the photo into a folder named after this user's id
-      const fileExt = imageFile.name.split('.').pop()
-      const filePath = `${user.id}/${report.report_id}.${fileExt}`
+      // 2. Upload each photo, into a folder named after this user's id.
+      // The first photo becomes the "primary" image used for CV detection.
+      const uploadedUrls = []
+      for (let i = 0; i < imageFiles.length; i++) {
+        const file = imageFiles[i]
+        const fileExt = file.name.split('.').pop()
+        const filePath = `${user.id}/${report.report_id}-${i}.${fileExt}`
 
-      const { error: uploadError } = await supabase.storage
-        .from('hazard-images')
-        .upload(filePath, imageFile)
+        const { error: uploadError } = await supabase.storage.from('hazard-images').upload(filePath, file)
+        if (uploadError) throw uploadError
 
-      if (uploadError) throw uploadError
+        const { data: urlData } = supabase.storage.from('hazard-images').getPublicUrl(filePath)
+        uploadedUrls.push(urlData.publicUrl)
+      }
 
-      const { data: urlData } = supabase.storage.from('hazard-images').getPublicUrl(filePath)
-
-      // 3. Save the image record, linked to the report
+      // 3. Save all image records, linked to the report
       const { error: imageError } = await supabase
         .from('hazard_images')
-        .insert({ report_id: report.report_id, image_url: urlData.publicUrl })
+        .insert(uploadedUrls.map((url) => ({ report_id: report.report_id, image_url: url })))
 
       if (imageError) throw imageError
 
@@ -163,24 +187,50 @@ export default function SubmitReport() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Photo</label>
-            <label
-              htmlFor="hazard-image"
-              className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center transition hover:border-[#0F4C81] hover:bg-[#0F4C81]/5"
-            >
-              {imagePreview ? (
-                <img src={imagePreview} alt="Preview" className="h-40 w-full rounded-lg object-cover" />
-              ) : (
-                <>
-                  <ImagePlus className="h-8 w-8 text-gray-400" />
-                  <span className="text-sm text-gray-500">Click to upload a photo</span>
-                </>
-              )}
+            <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">
+              Photos <span className="font-normal text-gray-400">(up to {MAX_IMAGES}, first one is used for AI detection)</span>
             </label>
+
+            {imagePreviews.length > 0 && (
+              <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                {imagePreviews.map((src, i) => (
+                  <div key={src} className="group relative aspect-square overflow-hidden rounded-xl">
+                    <img src={src} alt="" className="h-full w-full object-cover" />
+                    {i === 0 && (
+                      <span className="absolute left-1 top-1 rounded bg-[#0F4C81] px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                        Primary
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeImage(i)}
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition group-hover:opacity-100"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {imageFiles.length < MAX_IMAGES && (
+              <label
+                htmlFor="hazard-image"
+                className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-center transition hover:border-[#0F4C81] hover:bg-[#0F4C81]/5"
+              >
+                <ImagePlus className="h-7 w-7 text-gray-400" />
+                <span className="text-sm text-gray-500">
+                  {imageFiles.length === 0
+                    ? 'Click to upload photos'
+                    : `Add more (${MAX_IMAGES - imageFiles.length} remaining)`}
+                </span>
+              </label>
+            )}
             <input
               id="hazard-image"
               type="file"
               accept="image/*"
+              multiple
               onChange={handleImageChange}
               className="hidden"
             />
