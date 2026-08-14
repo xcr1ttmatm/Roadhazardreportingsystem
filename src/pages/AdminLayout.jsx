@@ -5,7 +5,7 @@ import { useAuth } from '../lib/AuthContext'
 const navItems = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/admin/reports', label: 'Reports', icon: ClipboardList },
-  // { to: '/admin/inspectors', label: 'Inspectors', icon: Users },  // added in Module 10
+  { to: '/admin/inspectors', label: 'Staff', icon: Users },
   // { to: '/admin/map', label: 'Hazard Map', icon: Map },           // reuse citizen map later
 ]
 

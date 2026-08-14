@@ -3,10 +3,13 @@ import { useParams, Link } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
-import { ArrowLeft, Calendar, User, Mail, MapPin, Scan, FileText, UserPlus, Sparkles } from 'lucide-react'
+import {
+  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send,
+} from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER } from '../lib/mapConfig'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
+import { generateReportPdf } from '../lib/generateReportPdf'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -37,11 +40,7 @@ const STATUS_LABELS = {
 function formatDate(dateString) {
   if (!dateString) return '—'
   return new Date(dateString).toLocaleString('en-PH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   })
 }
 
@@ -56,6 +55,12 @@ export default function ReportDetail() {
   const [detection, setDetection] = useState(null)
   const [loading, setLoading] = useState(true)
   const [detecting, setDetecting] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [inspectors, setInspectors] = useState([])
+  const [assignment, setAssignment] = useState(null)
+  const [selectedInspector, setSelectedInspector] = useState('')
+  const [assigning, setAssigning] = useState(false)
 
   async function fetchReport() {
     const { data, error } = await supabase
@@ -79,8 +84,32 @@ export default function ReportDetail() {
     if (!error) setDetection(data)
   }
 
+  async function fetchInspectors() {
+    const { data, error } = await supabase
+      .from('users')
+      .select('user_id, username, email')
+      .eq('user_type', 'inspector')
+      .order('username')
+
+    if (!error) setInspectors(data)
+  }
+
+  async function fetchAssignment() {
+    const { data, error } = await supabase
+      .from('inspector_assignments')
+      .select('*, inspector:users!inspector_assignments_assigned_to_fkey(username, email)')
+      .eq('report_id', reportId)
+      .order('assigned_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!error) setAssignment(data)
+  }
+
   useEffect(() => {
-    Promise.all([fetchReport(), fetchLatestDetection()]).finally(() => setLoading(false))
+    Promise.all([fetchReport(), fetchLatestDetection(), fetchInspectors(), fetchAssignment()]).finally(() =>
+      setLoading(false)
+    )
   }, [reportId])
 
   async function handleRunDetection() {
@@ -104,7 +133,7 @@ export default function ReportDetail() {
 
       toast.success('Hazard detection complete')
       setDetection(data.detection)
-      await fetchReport() // refresh severity + status shown on the page
+      await fetchReport()
     } catch (err) {
       console.error(err)
       toast.error(err.message || 'Detection failed')
@@ -113,10 +142,88 @@ export default function ReportDetail() {
     }
   }
 
+  async function handleGenerateReport() {
+    if (!detection) {
+      toast.error('Run Computer Vision Detection first')
+      return
+    }
+
+    setGenerating(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-report', {
+        body: {
+          reportId: report.report_id,
+          title: report.title,
+          description: report.description,
+          hazardType: detection.hazard_type,
+          severityLevel: detection.severity_level,
+          confidenceScore: detection.confidence_score,
+          detectionNotes: detection.detection_notes,
+          latitude: report.latitude,
+          longitude: report.longitude,
+          reporterUsername: report.reporter?.username,
+        },
+      })
+
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+
+      toast.success('AI report generated')
+      await fetchReport()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Report generation failed')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleDownloadPdf() {
+    setDownloadingPdf(true)
+    try {
+      await generateReportPdf(report, detection)
+    } catch (err) {
+      console.error(err)
+      toast.error('Could not generate PDF')
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
+  async function handleAssignInspector() {
+    if (!selectedInspector) {
+      toast.error('Choose an inspector first')
+      return
+    }
+
+    setAssigning(true)
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      const { error } = await supabase.from('inspector_assignments').insert({
+        report_id: report.report_id,
+        assigned_to: selectedInspector,
+        assigned_by: user.id,
+      })
+
+      if (error) throw error
+
+      toast.success('Inspector assigned')
+      setSelectedInspector('')
+      await fetchAssignment()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not assign inspector')
+    } finally {
+      setAssigning(false)
+    }
+  }
+
   if (loading) {
     return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Loading report...</p>
   }
-
   if (!report) {
     return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Report not found.</p>
   }
@@ -139,9 +246,21 @@ export default function ReportDetail() {
             Submitted {formatDate(report.created_at)}
           </div>
         </div>
-        <span className={`rounded-full px-3 py-1.5 text-sm font-medium ${STATUS_STYLES[report.status]}`}>
-          {STATUS_LABELS[report.status]}
-        </span>
+        <div className="flex items-center gap-2">
+          {report.ai_report && (
+            <button
+              onClick={handleDownloadPdf}
+              disabled={downloadingPdf}
+              className="flex items-center gap-1.5 rounded-lg border border-[#0F4C81]/20 bg-white px-3 py-1.5 text-xs font-semibold text-[#0F4C81] transition hover:bg-[#0F4C81]/5 disabled:opacity-60"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {downloadingPdf ? 'Preparing...' : 'Download PDF'}
+            </button>
+          )}
+          <span className={`rounded-full px-3 py-1.5 text-sm font-medium ${STATUS_STYLES[report.status]}`}>
+            {STATUS_LABELS[report.status]}
+          </span>
+        </div>
       </div>
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -167,9 +286,43 @@ export default function ReportDetail() {
               </p>
             </div>
           </div>
+
+          {/* AI-Assisted Report */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#0F4C81]">
+                <Sparkles className="h-4 w-4" />
+                AI-Assisted Report
+              </h2>
+              <button
+                onClick={handleGenerateReport}
+                disabled={generating || !detection}
+                title={!detection ? 'Run Computer Vision Detection first' : ''}
+                className="rounded-lg bg-[#0F4C81] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-40"
+              >
+                {generating ? 'Drafting...' : report.ai_report ? 'Regenerate' : 'Generate'}
+              </button>
+            </div>
+
+            {report.ai_report ? (
+              <div className="mt-3 space-y-3">
+                <ReportSection label="Executive Summary" text={report.ai_report.executive_summary} />
+                <ReportSection label="Hazard Description" text={report.ai_report.hazard_description} />
+                <ReportSection label="Severity Assessment" text={report.ai_report.severity_assessment} />
+                <ReportSection label="Recommended Action" text={report.ai_report.recommended_action} />
+                <p className="text-xs text-gray-400">Generated {formatDate(report.ai_report_generated_at)}</p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-gray-400">
+                {detection
+                  ? 'Not generated yet. Click Generate to draft a formal report.'
+                  : 'Run Computer Vision Detection first, then generate the report.'}
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Right: map + workflow actions */}
+        {/* Right: map + detection + next steps */}
         <div className="space-y-4">
           <div className="h-64 overflow-hidden rounded-2xl border border-gray-200">
             <MapContainer center={position} zoom={16} className="leaflet-container" zoomControl={false}>
@@ -206,10 +359,7 @@ export default function ReportDetail() {
                 <div className="flex items-center gap-2">
                   <span
                     className="rounded-full px-2.5 py-1 text-xs font-medium text-white"
-                    style={{
-                      backgroundColor:
-                        SEVERITY_COLORS[detection.severity_level?.toLowerCase()] || SEVERITY_COLORS.default,
-                    }}
+                    style={{ backgroundColor: SEVERITY_COLORS[detection.severity_level?.toLowerCase()] || SEVERITY_COLORS.default }}
                   >
                     {SEVERITY_LABELS[detection.severity_level?.toLowerCase()] || detection.severity_level}
                   </span>
@@ -230,30 +380,68 @@ export default function ReportDetail() {
             )}
           </div>
 
-          {/* Placeholders for upcoming modules */}
+          {/* Assign Inspector */}
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <h2 className="text-sm font-semibold text-[#0F4C81]">Next Steps</h2>
-            <div className="mt-3 space-y-2">
-              <button
-                disabled
-                className="flex w-full items-center gap-2 rounded-xl border border-dashed border-gray-200 px-4 py-3 text-left text-sm text-gray-400"
-              >
-                <Sparkles className="h-4 w-4" />
-                Generate AI-Assisted Report
-                <span className="ml-auto text-[10px] uppercase tracking-wide">Module 9</span>
-              </button>
-              <button
-                disabled
-                className="flex w-full items-center gap-2 rounded-xl border border-dashed border-gray-200 px-4 py-3 text-left text-sm text-gray-400"
-              >
-                <UserPlus className="h-4 w-4" />
-                Assign Inspector
-                <span className="ml-auto text-[10px] uppercase tracking-wide">Module 10</span>
-              </button>
-            </div>
+            <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#0F4C81]">
+              <UserPlus className="h-4 w-4" />
+              Inspector Assignment
+            </h2>
+
+            {assignment ? (
+              <div className="mt-3 space-y-1.5">
+                <p className="text-sm text-gray-600">
+                  Assigned to <span className="font-medium text-[#0F4C81]">{assignment.inspector?.username}</span>
+                </p>
+                <p className="text-xs text-gray-400">{assignment.inspector?.email}</p>
+                <span className="mt-1 inline-block rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium capitalize text-gray-600">
+                  {assignment.assignment_status}
+                </span>
+                <p className="text-xs text-gray-400">Assigned {formatDate(assignment.assigned_at)}</p>
+              </div>
+            ) : inspectors.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-400">
+                No inspector accounts yet.{' '}
+                <Link to="/admin/inspectors" className="font-medium text-[#0F4C81] hover:underline">
+                  Create one
+                </Link>
+                .
+              </p>
+            ) : (
+              <div className="mt-3 flex gap-2">
+                <select
+                  value={selectedInspector}
+                  onChange={(e) => setSelectedInspector(e.target.value)}
+                  className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
+                >
+                  <option value="">Select an inspector...</option>
+                  {inspectors.map((i) => (
+                    <option key={i.user_id} value={i.user_id}>
+                      {i.username}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={handleAssignInspector}
+                  disabled={assigning}
+                  className="flex items-center gap-1 rounded-lg bg-[#0F4C81] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  {assigning ? 'Assigning...' : 'Assign'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ReportSection({ label, text }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{label}</p>
+      <p className="mt-1 text-sm text-gray-600">{text}</p>
     </div>
   )
 }

@@ -14,6 +14,7 @@ import AdminLayout from './pages/AdminLayout'
 import AdminDashboard from './pages/AdminDashboard'
 import MonitorReports from './pages/MonitorReports'
 import ReportDetail from './pages/ReportDetail'
+import ManageUsers from './pages/ManageUsers'
 import InspectorDashboard from './pages/InspectorDashboard'
 
 function HomeRedirect() {
@@ -69,6 +70,7 @@ export default function App() {
             <Route index element={<AdminDashboard />} />
             <Route path="reports" element={<MonitorReports />} />
             <Route path="reports/:reportId" element={<ReportDetail />} />
+            <Route path="inspectors" element={<ManageUsers />} />
           </Route>
         </Routes>
       </AuthProvider>
