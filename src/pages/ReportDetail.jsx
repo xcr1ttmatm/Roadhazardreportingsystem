@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
-import { ArrowLeft, Calendar, User, Mail, MapPin, Scan, FileText, UserPlus } from 'lucide-react'
+import toast from 'react-hot-toast'
+import { ArrowLeft, Calendar, User, Mail, MapPin, Scan, FileText, UserPlus, Sparkles } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER } from '../lib/mapConfig'
+import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -43,25 +45,73 @@ function formatDate(dateString) {
   })
 }
 
+function formatHazardType(type) {
+  if (!type) return ''
+  return type.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 export default function ReportDetail() {
   const { reportId } = useParams()
   const [report, setReport] = useState(null)
+  const [detection, setDetection] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [detecting, setDetecting] = useState(false)
+
+  async function fetchReport() {
+    const { data, error } = await supabase
+      .from('hazard_reports')
+      .select('*, reporter:users!hazard_reports_user_id_fkey(username, email), hazard_images(image_id, image_url)')
+      .eq('report_id', reportId)
+      .single()
+
+    if (!error) setReport(data)
+  }
+
+  async function fetchLatestDetection() {
+    const { data, error } = await supabase
+      .from('hazard_detection_results')
+      .select('*')
+      .eq('report_id', reportId)
+      .order('detected_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!error) setDetection(data)
+  }
 
   useEffect(() => {
-    async function fetchReport() {
-      const { data, error } = await supabase
-        .from('hazard_reports')
-        .select('*, reporter:users!hazard_reports_user_id_fkey(username, email), hazard_images(image_url)')
-        .eq('report_id', reportId)
-        .single()
+    Promise.all([fetchReport(), fetchLatestDetection()]).finally(() => setLoading(false))
+  }, [reportId])
 
-      if (!error) setReport(data)
-      setLoading(false)
+  async function handleRunDetection() {
+    if (!report?.hazard_images?.[0]?.image_url) {
+      toast.error('This report has no image to analyze')
+      return
     }
 
-    fetchReport()
-  }, [reportId])
+    setDetecting(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('detect-hazard', {
+        body: {
+          reportId: report.report_id,
+          imageId: report.hazard_images[0].image_id,
+          imageUrl: report.hazard_images[0].image_url,
+        },
+      })
+
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+
+      toast.success('Hazard detection complete')
+      setDetection(data.detection)
+      await fetchReport() // refresh severity + status shown on the page
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Detection failed')
+    } finally {
+      setDetecting(false)
+    }
+  }
 
   if (loading) {
     return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Loading report...</p>
@@ -119,7 +169,7 @@ export default function ReportDetail() {
           </div>
         </div>
 
-        {/* Right: map + next-step actions */}
+        {/* Right: map + workflow actions */}
         <div className="space-y-4">
           <div className="h-64 overflow-hidden rounded-2xl border border-gray-200">
             <MapContainer center={position} zoom={16} className="leaflet-container" zoomControl={false}>
@@ -135,7 +185,52 @@ export default function ReportDetail() {
             {position[0].toFixed(5)}, {position[1].toFixed(5)}
           </p>
 
-          {/* Placeholders for upcoming modules — wired up as we build them */}
+          {/* Computer Vision Detection */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#0F4C81]">
+                <Scan className="h-4 w-4" />
+                Computer Vision Detection
+              </h2>
+              <button
+                onClick={handleRunDetection}
+                disabled={detecting}
+                className="rounded-lg bg-[#0F4C81] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
+              >
+                {detecting ? 'Analyzing...' : detection ? 'Re-run' : 'Run Detection'}
+              </button>
+            </div>
+
+            {detection ? (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="rounded-full px-2.5 py-1 text-xs font-medium text-white"
+                    style={{
+                      backgroundColor:
+                        SEVERITY_COLORS[detection.severity_level?.toLowerCase()] || SEVERITY_COLORS.default,
+                    }}
+                  >
+                    {SEVERITY_LABELS[detection.severity_level?.toLowerCase()] || detection.severity_level}
+                  </span>
+                  <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
+                    {formatHazardType(detection.hazard_type)}
+                  </span>
+                  <span className="ml-auto text-xs text-gray-400">
+                    {Number(detection.confidence_score).toFixed(0)}% confidence
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600">{detection.detection_notes}</p>
+                <p className="text-xs text-gray-400">Analyzed {formatDate(detection.detected_at)}</p>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-gray-400">
+                Not analyzed yet. Run detection to identify the hazard type and severity.
+              </p>
+            )}
+          </div>
+
+          {/* Placeholders for upcoming modules */}
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
             <h2 className="text-sm font-semibold text-[#0F4C81]">Next Steps</h2>
             <div className="mt-3 space-y-2">
@@ -143,15 +238,7 @@ export default function ReportDetail() {
                 disabled
                 className="flex w-full items-center gap-2 rounded-xl border border-dashed border-gray-200 px-4 py-3 text-left text-sm text-gray-400"
               >
-                <Scan className="h-4 w-4" />
-                Run Computer Vision Detection
-                <span className="ml-auto text-[10px] uppercase tracking-wide">Module 8</span>
-              </button>
-              <button
-                disabled
-                className="flex w-full items-center gap-2 rounded-xl border border-dashed border-gray-200 px-4 py-3 text-left text-sm text-gray-400"
-              >
-                <FileText className="h-4 w-4" />
+                <Sparkles className="h-4 w-4" />
                 Generate AI-Assisted Report
                 <span className="ml-auto text-[10px] uppercase tracking-wide">Module 9</span>
               </button>
