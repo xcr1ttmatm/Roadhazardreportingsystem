@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { ShieldAlert, Mail, Lock, User, ArrowRight, MapPin, Camera } from 'lucide-react'
+import { ShieldAlert, Mail, Lock, User, ArrowRight, MapPin, Camera, IdCard } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 
 export default function Register() {
   const { signUp } = useAuth()
   const navigate = useNavigate()
   const [username, setUsername] = useState('')
+  const [fullName, setFullName] = useState('')
+  const [address, setAddress] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -16,7 +18,7 @@ export default function Register() {
     e.preventDefault()
     setSubmitting(true)
 
-    const { error } = await signUp({ email, password, username })
+    const { error } = await signUp({ email, password, username, fullName, address })
 
     if (error) {
       toast.error(error.message)
@@ -98,6 +100,36 @@ export default function Register() {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-3 text-sm text-[#0F4C81] transition focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Full Name</label>
+              <div className="relative">
+                <IdCard className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="Juan Dela Cruz"
+                  className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-3 text-sm text-[#0F4C81] transition focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Address</label>
+              <div className="relative">
+                <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  required
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="Barangay, Iligan City"
                   className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-3 text-sm text-[#0F4C81] transition focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
                 />
               </div>

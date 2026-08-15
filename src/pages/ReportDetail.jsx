@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send,
+  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER } from '../lib/mapConfig'
@@ -61,11 +61,14 @@ export default function ReportDetail() {
   const [assignment, setAssignment] = useState(null)
   const [selectedInspector, setSelectedInspector] = useState('')
   const [assigning, setAssigning] = useState(false)
+  const [showRejectForm, setShowRejectForm] = useState(false)
+  const [rejectionReason, setRejectionReason] = useState('')
+  const [decisionLoading, setDecisionLoading] = useState(false)
 
   async function fetchReport() {
     const { data, error } = await supabase
       .from('hazard_reports')
-      .select('*, reporter:users!hazard_reports_user_id_fkey(username, email), hazard_images(image_id, image_url)')
+      .select('*, reporter:users!hazard_reports_user_id_fkey(username, email, full_name, address), hazard_images(image_id, image_url)')
       .eq('report_id', reportId)
       .single()
 
@@ -113,7 +116,8 @@ export default function ReportDetail() {
   }, [reportId])
 
   async function handleRunDetection() {
-    if (!report?.hazard_images?.[0]?.image_url) {
+    const primaryImage = report?.hazard_images?.[0]
+    if (!primaryImage?.image_url) {
       toast.error('This report has no image to analyze')
       return
     }
@@ -123,8 +127,8 @@ export default function ReportDetail() {
       const { data, error } = await supabase.functions.invoke('detect-hazard', {
         body: {
           reportId: report.report_id,
-          imageId: report.hazard_images[0].image_id,
-          imageUrl: report.hazard_images[0].image_url,
+          imageId: primaryImage.image_id,
+          imageUrl: primaryImage.image_url,
         },
       })
 
@@ -221,6 +225,64 @@ export default function ReportDetail() {
     }
   }
 
+  async function handleApprove() {
+    setDecisionLoading(true)
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      const { error } = await supabase
+        .from('hazard_reports')
+        .update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() })
+        .eq('report_id', report.report_id)
+
+      if (error) throw error
+      toast.success('Report approved — now visible on the public Hazard Map')
+      await fetchReport()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not approve report')
+    } finally {
+      setDecisionLoading(false)
+    }
+  }
+
+  async function handleReject() {
+    if (!rejectionReason.trim()) {
+      toast.error('Please give a reason so the citizen understands why')
+      return
+    }
+
+    setDecisionLoading(true)
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      const { error } = await supabase
+        .from('hazard_reports')
+        .update({
+          status: 'rejected',
+          rejection_reason: rejectionReason.trim(),
+          approved_by: user.id,
+          approved_at: new Date().toISOString(),
+        })
+        .eq('report_id', report.report_id)
+
+      if (error) throw error
+      toast.success('Report rejected')
+      setShowRejectForm(false)
+      setRejectionReason('')
+      await fetchReport()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not reject report')
+    } finally {
+      setDecisionLoading(false)
+    }
+  }
+
   if (loading) {
     return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Loading report...</p>
   }
@@ -229,7 +291,7 @@ export default function ReportDetail() {
   }
 
   const position = [Number(report.latitude), Number(report.longitude)]
-  const image = report.hazard_images?.[0]?.image_url
+  const images = report.hazard_images || []
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
@@ -263,10 +325,85 @@ export default function ReportDetail() {
         </div>
       </div>
 
+      {/* Decision */}
+      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
+        {report.status === 'rejected' ? (
+          <div>
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-[#CE1126]">
+              <XCircle className="h-4 w-4" />
+              Rejected
+            </p>
+            <p className="mt-1 text-sm text-gray-600">Reason: {report.rejection_reason}</p>
+          </div>
+        ) : report.status === 'approved' ? (
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
+            <CheckCircle2 className="h-4 w-4" />
+            Approved — visible on the public Hazard Map
+          </p>
+        ) : (
+          <div>
+            <h2 className="text-sm font-semibold text-[#0F4C81]">Decision</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={handleApprove}
+                disabled={decisionLoading}
+                className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:opacity-60"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Approve
+              </button>
+              <button
+                onClick={() => setShowRejectForm((s) => !s)}
+                disabled={decisionLoading}
+                className="flex items-center gap-1.5 rounded-lg bg-[#CE1126] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#A50E1F] disabled:opacity-60"
+              >
+                <XCircle className="h-4 w-4" />
+                Reject
+              </button>
+            </div>
+
+            {showRejectForm && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  rows={2}
+                  value={rejectionReason}
+                  onChange={(e) => setRejectionReason(e.target.value)}
+                  placeholder="Reason for rejection — this will be shown to the citizen (e.g. spam, duplicate report, not a road hazard)"
+                  className="w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#CE1126] focus:outline-none"
+                />
+                <button
+                  onClick={handleReject}
+                  disabled={decisionLoading}
+                  className="rounded-lg bg-[#CE1126] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#A50E1F] disabled:opacity-60"
+                >
+                  {decisionLoading ? 'Submitting...' : 'Confirm Rejection'}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Left: photo + description */}
         <div className="space-y-4">
-          {image && <img src={image} alt="" className="h-64 w-full rounded-2xl object-cover" />}
+          {images.length > 0 && (
+            <div>
+              <img src={images[0].image_url} alt="" className="h-64 w-full rounded-2xl object-cover" />
+              {images.length > 1 && (
+                <div className="mt-2 grid grid-cols-4 gap-2">
+                  {images.slice(1).map((img) => (
+                    <img
+                      key={img.image_id}
+                      src={img.image_url}
+                      alt=""
+                      className="h-16 w-full rounded-lg object-cover"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
             <h2 className="text-sm font-semibold text-[#0F4C81]">Description</h2>
@@ -277,12 +414,20 @@ export default function ReportDetail() {
             <h2 className="text-sm font-semibold text-[#0F4C81]">Reported By</h2>
             <div className="mt-2 space-y-1.5">
               <p className="flex items-center gap-2 text-sm text-gray-600">
+                <IdCard className="h-3.5 w-3.5 text-gray-400" />
+                {report.reporter?.full_name || 'Not provided'}
+              </p>
+              <p className="flex items-center gap-2 text-sm text-gray-600">
                 <User className="h-3.5 w-3.5 text-gray-400" />
                 {report.reporter?.username ?? 'Unknown'}
               </p>
               <p className="flex items-center gap-2 text-sm text-gray-600">
                 <Mail className="h-3.5 w-3.5 text-gray-400" />
                 {report.reporter?.email ?? '—'}
+              </p>
+              <p className="flex items-center gap-2 text-sm text-gray-600">
+                <Home className="h-3.5 w-3.5 text-gray-400" />
+                {report.reporter?.address || 'Not provided'}
               </p>
             </div>
           </div>

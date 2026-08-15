@@ -36,6 +36,9 @@ function FlyToPosition({ position }) {
   return null
 }
 
+// Kept in sync with the categories the CV detection model uses (Module 8)
+const HAZARD_TYPE_OPTIONS = ['Pothole', 'Debris', 'Crack', 'Scouring']
+
 export default function SubmitReport() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -97,6 +100,7 @@ export default function SubmitReport() {
   async function handleSubmit(e) {
     e.preventDefault()
 
+    if (!title) return toast.error('Please select what you are reporting')
     if (!description.trim()) return toast.error('Please describe the hazard')
     if (!position) return toast.error('Please pin the hazard location on the map')
     if (imageFiles.length === 0) return toast.error('Please upload at least one photo of the hazard')
@@ -162,16 +166,18 @@ export default function SubmitReport() {
         {/* Left column: details */}
         <div className="space-y-5">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">
-              Title <span className="font-normal text-gray-400">(optional)</span>
-            </label>
-            <input
-              type="text"
+            <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Hazard Type</label>
+            <select
+              required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Large pothole near barangay hall"
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-[#0F4C81] transition focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
-            />
+            >
+              <option value="" disabled>Select what you're reporting...</option>
+              {HAZARD_TYPE_OPTIONS.map((opt) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
           </div>
 
           <div>

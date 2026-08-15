@@ -44,12 +44,12 @@ export function AuthProvider({ children }) {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  async function signUp({ email, password, username }) {
+  async function signUp({ email, password, username, fullName, address }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { username, user_type: 'citizen' }, // inspectors/admins are created by an admin later
+        data: { username, user_type: 'citizen', full_name: fullName, address }, // inspectors/admins are created by an admin later
       },
     })
     return { data, error }

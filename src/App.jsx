@@ -15,7 +15,9 @@ import AdminDashboard from './pages/AdminDashboard'
 import MonitorReports from './pages/MonitorReports'
 import ReportDetail from './pages/ReportDetail'
 import ManageUsers from './pages/ManageUsers'
+import InspectorLayout from './pages/InspectorLayout'
 import InspectorDashboard from './pages/InspectorDashboard'
+import InspectionDetail from './pages/InspectionDetail'
 
 function HomeRedirect() {
   const { user, profile, loading } = useAuth()
@@ -51,13 +53,17 @@ export default function App() {
           </Route>
 
           <Route
-            path="/inspector/*"
+            path="/inspector"
             element={
               <ProtectedRoute allowedRoles={['inspector']}>
-                <InspectorDashboard />
+                <InspectorLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<InspectorDashboard />} />
+            <Route path="reports/:reportId" element={<InspectionDetail />} />
+            <Route path="map" element={<HazardMap />} />
+          </Route>
 
           <Route
             path="/admin"

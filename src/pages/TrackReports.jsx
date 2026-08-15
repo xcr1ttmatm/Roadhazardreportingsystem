@@ -111,6 +111,13 @@ export default function TrackReports() {
                       {Number(report.latitude).toFixed(5)}, {Number(report.longitude).toFixed(5)}
                     </div>
 
+                    {report.status === 'rejected' && report.rejection_reason && (
+                      <div className="mt-4 rounded-lg bg-red-50 px-3 py-2.5 text-sm text-[#CE1126]">
+                        <span className="font-medium">Reason for rejection: </span>
+                        {report.rejection_reason}
+                      </div>
+                    )}
+
                     {/* simple status timeline */}
                     <div className="mt-4 space-y-2 border-l-2 border-gray-100 pl-4">
                       <TimelineStep label="Submitted" date={report.created_at} done />
