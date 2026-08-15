@@ -77,6 +77,7 @@ export default function App() {
             <Route path="reports" element={<MonitorReports />} />
             <Route path="reports/:reportId" element={<ReportDetail />} />
             <Route path="inspectors" element={<ManageUsers />} />
+            <Route path="map" element={<HazardMap />} />
           </Route>
         </Routes>
       </AuthProvider>

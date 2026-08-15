@@ -9,6 +9,7 @@ const STATUS_STYLES = {
   verified: 'bg-purple-100 text-purple-700',
   approved: 'bg-green-100 text-green-700',
   rejected: 'bg-red-100 text-[#CE1126]',
+  resolved: 'bg-emerald-100 text-emerald-700',
 }
 
 const STATUS_LABELS = {
@@ -17,9 +18,10 @@ const STATUS_LABELS = {
   verified: 'Verified',
   approved: 'Approved',
   rejected: 'Rejected',
+  resolved: 'Resolved',
 }
 
-const FILTERS = ['all', 'pending', 'under_review', 'verified', 'approved', 'rejected']
+const FILTERS = ['all', 'pending', 'under_review', 'verified', 'approved', 'rejected', 'resolved']
 
 function formatDate(dateString) {
   return new Date(dateString).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })

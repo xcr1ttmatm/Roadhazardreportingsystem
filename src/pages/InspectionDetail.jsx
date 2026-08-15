@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
@@ -43,6 +43,15 @@ function formatHazardType(type) {
   return type.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+function CorrectionMarker({ position, setPosition }) {
+  useMapEvents({
+    click(e) {
+      setPosition(e.latlng)
+    },
+  })
+  return position ? <Marker position={position} /> : null
+}
+
 const MAX_PHOTOS = 5
 
 export default function InspectionDetail() {
@@ -61,6 +70,9 @@ export default function InspectionDetail() {
   const [findings, setFindings] = useState('')
   const [newPhotoFiles, setNewPhotoFiles] = useState([])
   const [newPhotoPreviews, setNewPhotoPreviews] = useState([])
+  const [correctingLocation, setCorrectingLocation] = useState(false)
+  const [correctedPosition, setCorrectedPosition] = useState(null)
+  const [savingLocation, setSavingLocation] = useState(false)
 
   async function fetchAll() {
     const [{ data: reportData }, { data: detectionData }, { data: assignmentData }, { data: photosData }] =
@@ -87,6 +99,9 @@ export default function InspectionDetail() {
       ])
 
     setReport(reportData)
+    if (reportData?.verified_latitude && reportData?.verified_longitude) {
+      setCorrectedPosition({ lat: Number(reportData.verified_latitude), lng: Number(reportData.verified_longitude) })
+    }
     setDetection(detectionData)
     setAssignment(assignmentData)
     setPhotos(photosData || [])
@@ -191,6 +206,48 @@ export default function InspectionDetail() {
       toast.error(err.message || 'Could not submit findings')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleConfirmLocation() {
+    setSavingLocation(true)
+    try {
+      const { error } = await supabase
+        .from('hazard_reports')
+        .update({ verified_latitude: report.latitude, verified_longitude: report.longitude })
+        .eq('report_id', reportId)
+
+      if (error) throw error
+      toast.success('Location confirmed as accurate')
+      setCorrectedPosition({ lat: Number(report.latitude), lng: Number(report.longitude) })
+      await fetchAll()
+    } catch (err) {
+      toast.error(err.message || 'Could not confirm location')
+    } finally {
+      setSavingLocation(false)
+    }
+  }
+
+  async function handleSaveCorrectedLocation() {
+    if (!correctedPosition) {
+      toast.error('Click on the map to pin the correct location first')
+      return
+    }
+    setSavingLocation(true)
+    try {
+      const { error } = await supabase
+        .from('hazard_reports')
+        .update({ verified_latitude: correctedPosition.lat, verified_longitude: correctedPosition.lng })
+        .eq('report_id', reportId)
+
+      if (error) throw error
+      toast.success('Corrected location saved — the admin will use this when approving')
+      setCorrectingLocation(false)
+      await fetchAll()
+    } catch (err) {
+      toast.error(err.message || 'Could not save corrected location')
+    } finally {
+      setSavingLocation(false)
     }
   }
 
@@ -344,19 +401,82 @@ export default function InspectionDetail() {
 
         {/* Right: map + site inspection work */}
         <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-gray-500">
+              {correctingLocation ? 'Tap the map to pin the correct location' : 'Reported location'}
+            </p>
+            {assignment.assignment_status === 'accepted' && !correctingLocation && (
+              <div className="flex gap-3">
+                <button
+                  onClick={handleConfirmLocation}
+                  disabled={savingLocation}
+                  className="text-xs font-medium text-green-700 hover:underline disabled:opacity-60"
+                >
+                  Confirm Accurate
+                </button>
+                <button
+                  onClick={() => setCorrectingLocation(true)}
+                  className="text-xs font-medium text-[#0F4C81] hover:underline"
+                >
+                  Correct Location
+                </button>
+              </div>
+            )}
+            {correctingLocation && (
+              <button
+                onClick={() => setCorrectingLocation(false)}
+                className="text-xs font-medium text-gray-500 hover:underline"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+
           <div className="h-56 overflow-hidden rounded-2xl border border-gray-200">
-            <MapContainer center={position} zoom={16} className="leaflet-container" zoomControl={false}>
+            <MapContainer
+              center={correctedPosition || position}
+              zoom={16}
+              className="leaflet-container"
+              zoomControl={false}
+            >
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
               />
-              <Marker position={position} />
+              {correctingLocation ? (
+                <CorrectionMarker position={correctedPosition} setPosition={setCorrectedPosition} />
+              ) : (
+                <Marker position={correctedPosition ? [correctedPosition.lat, correctedPosition.lng] : position} />
+              )}
             </MapContainer>
           </div>
-          <p className="flex items-center gap-1 text-xs text-gray-400">
-            <MapPin className="h-3.5 w-3.5" />
-            {position[0].toFixed(5)}, {position[1].toFixed(5)}
-          </p>
+
+          {correctingLocation ? (
+            <button
+              onClick={handleSaveCorrectedLocation}
+              disabled={savingLocation}
+              className="rounded-lg bg-[#0F4C81] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
+            >
+              {savingLocation ? 'Saving...' : 'Save Corrected Location'}
+            </button>
+          ) : (
+            <p className="flex items-center gap-1 text-xs text-gray-400">
+              <MapPin className="h-3.5 w-3.5" />
+              {correctedPosition ? (
+                <>
+                  {correctedPosition.lat.toFixed(5)}, {correctedPosition.lng.toFixed(5)}{' '}
+                  <span className="text-green-700">
+                    {Number(correctedPosition.lat).toFixed(5) === Number(report.latitude).toFixed(5) &&
+                    Number(correctedPosition.lng).toFixed(5) === Number(report.longitude).toFixed(5)
+                      ? '(confirmed accurate by you)'
+                      : '(corrected by you)'}
+                  </span>
+                </>
+              ) : (
+                `${position[0].toFixed(5)}, ${position[1].toFixed(5)} (not yet confirmed)`
+              )}
+            </p>
+          )}
 
           {assignment.assignment_status !== 'pending' && (
             <>

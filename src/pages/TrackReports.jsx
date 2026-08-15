@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { MapPin, Calendar, ChevronDown } from 'lucide-react'
+import { getDisplayPosition, hasVerifiedLocation } from '../lib/reportLocation'
 
 const STATUS_STYLES = {
   pending: 'bg-gray-100 text-gray-600',
@@ -9,6 +10,7 @@ const STATUS_STYLES = {
   verified: 'bg-purple-100 text-purple-700',
   approved: 'bg-green-100 text-green-700',
   rejected: 'bg-red-100 text-[#CE1126]',
+  resolved: 'bg-emerald-100 text-emerald-700',
 }
 
 const STATUS_LABELS = {
@@ -17,6 +19,7 @@ const STATUS_LABELS = {
   verified: 'Verified',
   approved: 'Approved',
   rejected: 'Rejected',
+  resolved: 'Resolved',
 }
 
 function formatDate(dateString) {
@@ -108,7 +111,10 @@ export default function TrackReports() {
                     <p className="text-sm text-gray-600">{report.description}</p>
                     <div className="mt-3 flex items-center gap-1 text-xs text-gray-400">
                       <MapPin className="h-3.5 w-3.5" />
-                      {Number(report.latitude).toFixed(5)}, {Number(report.longitude).toFixed(5)}
+                      {getDisplayPosition(report)[0].toFixed(5)}, {getDisplayPosition(report)[1].toFixed(5)}
+                      {hasVerifiedLocation(report) && (
+                        <span className="text-green-700">(corrected by inspector on-site)</span>
+                      )}
                     </div>
 
                     {report.status === 'rejected' && report.rejection_reason && (

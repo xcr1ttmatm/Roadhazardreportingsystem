@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf'
 import { SEVERITY_LABELS } from './severity'
+import { getDisplayPosition, hasVerifiedLocation } from './reportLocation'
 
 const STATUS_LABELS = {
   pending: 'Pending',
@@ -7,6 +8,7 @@ const STATUS_LABELS = {
   verified: 'Verified',
   approved: 'Approved',
   rejected: 'Rejected',
+  resolved: 'Resolved',
 }
 
 function formatDate(dateString) {
@@ -87,21 +89,24 @@ export async function generateReportPdf(report, detection) {
     y += 4
   }
 
+  const [pdfLat, pdfLng] = getDisplayPosition(report)
   sectionHeader('Basic Information')
   bodyText(
     `Title: ${report.title || 'Untitled hazard report'}\n` +
     `Status: ${STATUS_LABELS[report.status]}\n` +
     `Submitted: ${formatDate(report.created_at)}\n` +
-    `Location: ${Number(report.latitude).toFixed(5)}, ${Number(report.longitude).toFixed(5)}\n` +
+    `Location: ${pdfLat.toFixed(5)}, ${pdfLng.toFixed(5)}` +
+    (hasVerifiedLocation(report) ? ' (inspector-verified)' : ' (citizen-reported, not yet verified)') + '\n' +
     `Reported by: ${report.reporter?.username ?? 'Unknown'}`
   )
 
   sectionHeader('Citizen Description')
   bodyText(report.description)
 
-  if (report.hazard_images?.[0]?.image_url) {
+  const primaryImageUrl = report.featured_image_url || report.hazard_images?.[0]?.image_url
+  if (primaryImageUrl) {
     try {
-      const dataUrl = await urlToDataUrl(report.hazard_images[0].image_url)
+      const dataUrl = await urlToDataUrl(primaryImageUrl)
       if (y > 200) { doc.addPage(); y = 20 }
       doc.addImage(dataUrl, 'JPEG', margin, y, 80, 60)
       y += 68

@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home,
+  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER } from '../lib/mapConfig'
@@ -27,6 +27,7 @@ const STATUS_STYLES = {
   verified: 'bg-purple-100 text-purple-700',
   approved: 'bg-green-100 text-green-700',
   rejected: 'bg-red-100 text-[#CE1126]',
+  resolved: 'bg-emerald-100 text-emerald-700',
 }
 
 const STATUS_LABELS = {
@@ -35,6 +36,7 @@ const STATUS_LABELS = {
   verified: 'Verified',
   approved: 'Approved',
   rejected: 'Rejected',
+  resolved: 'Resolved',
 }
 
 function formatDate(dateString) {
@@ -64,6 +66,14 @@ export default function ReportDetail() {
   const [showRejectForm, setShowRejectForm] = useState(false)
   const [rejectionReason, setRejectionReason] = useState('')
   const [decisionLoading, setDecisionLoading] = useState(false)
+  const [inspectionPhotos, setInspectionPhotos] = useState([])
+  const [showApproveGallery, setShowApproveGallery] = useState(false)
+  const [selectedImageUrl, setSelectedImageUrl] = useState(null)
+  const [editingDescription, setEditingDescription] = useState(false)
+  const [descriptionDraft, setDescriptionDraft] = useState('')
+  const [savingDescription, setSavingDescription] = useState(false)
+  const [reassigning, setReassigning] = useState(false)
+  const [reassignSelection, setReassignSelection] = useState('')
 
   async function fetchReport() {
     const { data, error } = await supabase
@@ -109,9 +119,19 @@ export default function ReportDetail() {
     if (!error) setAssignment(data)
   }
 
+  async function fetchInspectionPhotos() {
+    const { data, error } = await supabase
+      .from('inspection_photos')
+      .select('*')
+      .eq('report_id', reportId)
+      .order('uploaded_at')
+
+    if (!error) setInspectionPhotos(data)
+  }
+
   useEffect(() => {
-    Promise.all([fetchReport(), fetchLatestDetection(), fetchInspectors(), fetchAssignment()]).finally(() =>
-      setLoading(false)
+    Promise.all([fetchReport(), fetchLatestDetection(), fetchInspectors(), fetchAssignment(), fetchInspectionPhotos()]).finally(
+      () => setLoading(false)
     )
   }, [reportId])
 
@@ -225,20 +245,41 @@ export default function ReportDetail() {
     }
   }
 
-  async function handleApprove() {
+  function openApproveGallery() {
+    const allImages = [
+      ...(report.hazard_images || []).map((img) => img.image_url),
+      ...inspectionPhotos.map((p) => p.photo_url),
+    ]
+    setSelectedImageUrl(report.featured_image_url || allImages[0] || null)
+    setShowApproveGallery(true)
+  }
+
+  async function handleConfirmApprove() {
     setDecisionLoading(true)
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser()
 
-      const { error } = await supabase
-        .from('hazard_reports')
-        .update({ status: 'approved', approved_by: user.id, approved_at: new Date().toISOString() })
-        .eq('report_id', report.report_id)
+      const updates = {
+        status: 'approved',
+        approved_by: user.id,
+        approved_at: new Date().toISOString(),
+        featured_image_url: selectedImageUrl,
+      }
+
+      // If the inspector corrected the location on-site, finalize it as the
+      // official location now that the report is being approved.
+      if (report.verified_latitude && report.verified_longitude) {
+        updates.latitude = report.verified_latitude
+        updates.longitude = report.verified_longitude
+      }
+
+      const { error } = await supabase.from('hazard_reports').update(updates).eq('report_id', report.report_id)
 
       if (error) throw error
       toast.success('Report approved — now visible on the public Hazard Map')
+      setShowApproveGallery(false)
       await fetchReport()
     } catch (err) {
       console.error(err)
@@ -283,6 +324,132 @@ export default function ReportDetail() {
     }
   }
 
+  // Reverts an approve/reject/resolved decision back to a sensible earlier
+  // state, for when an admin clicks the wrong button by accident.
+  async function handleUndoDecision() {
+    setDecisionLoading(true)
+    try {
+      let revertTo = 'pending'
+      if (report.status === 'resolved') revertTo = 'approved'
+      else if (report.verified_at) revertTo = 'verified'
+      else if (report.ai_report || detection) revertTo = 'under_review'
+
+      const updates = {
+        status: revertTo,
+        approved_by: null,
+        approved_at: null,
+        rejection_reason: null,
+      }
+      if (revertTo !== 'approved') {
+        updates.resolved_by = null
+        updates.resolved_at = null
+      }
+
+      const { error } = await supabase.from('hazard_reports').update(updates).eq('report_id', report.report_id)
+      if (error) throw error
+      toast.success('Decision undone')
+      await fetchReport()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not undo decision')
+    } finally {
+      setDecisionLoading(false)
+    }
+  }
+
+  async function handleMarkResolved() {
+    setDecisionLoading(true)
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      const { error } = await supabase
+        .from('hazard_reports')
+        .update({ status: 'resolved', resolved_by: user.id, resolved_at: new Date().toISOString() })
+        .eq('report_id', report.report_id)
+
+      if (error) throw error
+      toast.success('Marked as resolved')
+      await fetchReport()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not mark as resolved')
+    } finally {
+      setDecisionLoading(false)
+    }
+  }
+
+  async function handleCancelAssignment() {
+    setReassigning(true)
+    try {
+      const { error } = await supabase.from('inspector_assignments').delete().eq('assignment_id', assignment.assignment_id)
+      if (error) throw error
+      toast.success('Assignment cancelled')
+      setAssignment(null)
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not cancel assignment')
+    } finally {
+      setReassigning(false)
+    }
+  }
+
+  async function handleReassignInspector() {
+    if (!reassignSelection) {
+      toast.error('Choose a new inspector first')
+      return
+    }
+    setReassigning(true)
+    try {
+      const { error } = await supabase
+        .from('inspector_assignments')
+        .update({
+          assigned_to: reassignSelection,
+          assignment_status: 'pending',
+          accepted_at: null,
+          completed_at: null,
+          remarks: null,
+        })
+        .eq('assignment_id', assignment.assignment_id)
+
+      if (error) throw error
+      toast.success('Inspector reassigned')
+      setReassignSelection('')
+      await fetchAssignment()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not reassign inspector')
+    } finally {
+      setReassigning(false)
+    }
+  }
+
+  async function handleSaveDescription() {
+    if (!descriptionDraft.trim()) {
+      toast.error('Description cannot be empty')
+      return
+    }
+    setSavingDescription(true)
+    try {
+      const { error } = await supabase
+        .from('hazard_reports')
+        .update({ description: descriptionDraft.trim() })
+        .eq('report_id', report.report_id)
+
+      if (error) throw error
+      toast.success('Description updated')
+      setEditingDescription(false)
+      await fetchReport()
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not update description')
+    } finally {
+      setSavingDescription(false)
+    }
+  }
+
+
   if (loading) {
     return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Loading report...</p>
   }
@@ -290,7 +457,10 @@ export default function ReportDetail() {
     return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Report not found.</p>
   }
 
-  const position = [Number(report.latitude), Number(report.longitude)]
+  const hasCorrectedLocation = report.verified_latitude && report.verified_longitude
+  const position = hasCorrectedLocation
+    ? [Number(report.verified_latitude), Number(report.verified_longitude)]
+    : [Number(report.latitude), Number(report.longitude)]
   const images = report.hazard_images || []
 
   return (
@@ -328,24 +498,69 @@ export default function ReportDetail() {
       {/* Decision */}
       <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
         {report.status === 'rejected' ? (
-          <div>
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-[#CE1126]">
-              <XCircle className="h-4 w-4" />
-              Rejected
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-[#CE1126]">
+                <XCircle className="h-4 w-4" />
+                Rejected
+              </p>
+              <p className="mt-1 text-sm text-gray-600">Reason: {report.rejection_reason}</p>
+            </div>
+            <button
+              onClick={handleUndoDecision}
+              disabled={decisionLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:opacity-60"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+              Undo
+            </button>
+          </div>
+        ) : report.status === 'resolved' ? (
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-emerald-700">
+              <CheckCircle2 className="h-4 w-4" />
+              Resolved — hazard has been repaired
             </p>
-            <p className="mt-1 text-sm text-gray-600">Reason: {report.rejection_reason}</p>
+            <button
+              onClick={handleUndoDecision}
+              disabled={decisionLoading}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:opacity-60"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+              Undo
+            </button>
           </div>
         ) : report.status === 'approved' ? (
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
-            <CheckCircle2 className="h-4 w-4" />
-            Approved — visible on the public Hazard Map
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
+              <CheckCircle2 className="h-4 w-4" />
+              Approved — visible on the public Hazard Map
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleMarkResolved}
+                disabled={decisionLoading}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Mark as Resolved
+              </button>
+              <button
+                onClick={handleUndoDecision}
+                disabled={decisionLoading}
+                className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:opacity-60"
+              >
+                <Undo2 className="h-3.5 w-3.5" />
+                Undo
+              </button>
+            </div>
+          </div>
         ) : (
           <div>
             <h2 className="text-sm font-semibold text-[#0F4C81]">Decision</h2>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
-                onClick={handleApprove}
+                onClick={openApproveGallery}
                 disabled={decisionLoading}
                 className="flex items-center gap-1.5 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:opacity-60"
               >
@@ -380,6 +595,43 @@ export default function ReportDetail() {
                 </button>
               </div>
             )}
+
+            {showApproveGallery && (
+              <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                <p className="text-xs font-medium text-gray-500">
+                  Choose the best photo to represent this hazard on the public Hazard Map:
+                </p>
+                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+                  {[...(report.hazard_images || []).map((img) => img.image_url), ...inspectionPhotos.map((p) => p.photo_url)].map(
+                    (url) => (
+                      <button
+                        key={url}
+                        type="button"
+                        onClick={() => setSelectedImageUrl(url)}
+                        className={`aspect-square overflow-hidden rounded-lg border-2 transition ${
+                          selectedImageUrl === url ? 'border-[#0F4C81]' : 'border-transparent'
+                        }`}
+                      >
+                        <img src={url} alt="" className="h-full w-full object-cover" />
+                      </button>
+                    )
+                  )}
+                </div>
+                {report.verified_latitude && report.verified_longitude && (
+                  <p className="mt-3 text-xs text-blue-700">
+                    ℹ️ The inspector corrected this report's location on-site — that corrected pin will be used
+                    as the official location once approved.
+                  </p>
+                )}
+                <button
+                  onClick={handleConfirmApprove}
+                  disabled={decisionLoading || !selectedImageUrl}
+                  className="mt-3 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-700 disabled:opacity-60"
+                >
+                  {decisionLoading ? 'Approving...' : 'Confirm Approval'}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -406,8 +658,49 @@ export default function ReportDetail() {
           )}
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <h2 className="text-sm font-semibold text-[#0F4C81]">Description</h2>
-            <p className="mt-2 text-sm text-gray-600">{report.description}</p>
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-[#0F4C81]">Description</h2>
+              {!editingDescription && (
+                <button
+                  onClick={() => {
+                    setDescriptionDraft(report.description)
+                    setEditingDescription(true)
+                  }}
+                  className="flex items-center gap-1 text-xs font-medium text-[#0F4C81] hover:underline"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </button>
+              )}
+            </div>
+
+            {editingDescription ? (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  rows={4}
+                  value={descriptionDraft}
+                  onChange={(e) => setDescriptionDraft(e.target.value)}
+                  className="w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSaveDescription}
+                    disabled={savingDescription}
+                    className="rounded-lg bg-[#0F4C81] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
+                  >
+                    {savingDescription ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => setEditingDescription(false)}
+                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-gray-600">{report.description}</p>
+            )}
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
@@ -481,6 +774,11 @@ export default function ReportDetail() {
           <p className="flex items-center gap-1 text-xs text-gray-400">
             <MapPin className="h-3.5 w-3.5" />
             {position[0].toFixed(5)}, {position[1].toFixed(5)}
+            {hasCorrectedLocation ? (
+              <span className="text-green-700">(inspector-verified location)</span>
+            ) : (
+              <span>(citizen-reported location — not yet verified by inspector)</span>
+            )}
           </p>
 
           {/* Computer Vision Detection */}
@@ -542,6 +840,41 @@ export default function ReportDetail() {
                   {assignment.assignment_status}
                 </span>
                 <p className="text-xs text-gray-400">Assigned {formatDate(assignment.assigned_at)}</p>
+
+                {assignment.assignment_status !== 'completed' && (
+                  <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
+                    <div className="flex gap-2">
+                      <select
+                        value={reassignSelection}
+                        onChange={(e) => setReassignSelection(e.target.value)}
+                        className="flex-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
+                      >
+                        <option value="">Reassign to...</option>
+                        {inspectors
+                          .filter((i) => i.user_id !== assignment.assigned_to)
+                          .map((i) => (
+                            <option key={i.user_id} value={i.user_id}>
+                              {i.username}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={handleReassignInspector}
+                        disabled={reassigning}
+                        className="rounded-lg bg-[#0F4C81] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
+                      >
+                        Reassign
+                      </button>
+                    </div>
+                    <button
+                      onClick={handleCancelAssignment}
+                      disabled={reassigning}
+                      className="text-xs font-medium text-[#CE1126] hover:underline disabled:opacity-60"
+                    >
+                      Cancel Assignment
+                    </button>
+                  </div>
+                )}
               </div>
             ) : inspectors.length === 0 ? (
               <p className="mt-2 text-sm text-gray-400">

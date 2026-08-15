@@ -6,7 +6,7 @@ const navItems = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/admin/reports', label: 'Reports', icon: ClipboardList },
   { to: '/admin/inspectors', label: 'Staff', icon: Users },
-  // { to: '/admin/map', label: 'Hazard Map', icon: Map },           // reuse citizen map later
+  { to: '/admin/map', label: 'Hazard Map', icon: Map },
 ]
 
 export default function AdminLayout() {
