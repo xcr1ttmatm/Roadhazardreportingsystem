@@ -4,13 +4,14 @@ import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil, Trash2, X,
+  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil, Trash2,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER } from '../lib/mapConfig'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
 import { deleteHazardReport } from '../lib/deleteReport'
+import ImageLightbox from '../components/ImageLightbox'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -79,7 +80,7 @@ export default function ReportDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting] = useState(false)
-  const [lightboxImage, setLightboxImage] = useState(null)
+  const [lightboxIndex, setLightboxIndex] = useState(null)
 
   async function fetchReport() {
     const { data, error } = await supabase
@@ -487,6 +488,10 @@ export default function ReportDetail() {
     ? [Number(report.verified_latitude), Number(report.verified_longitude)]
     : [Number(report.latitude), Number(report.longitude)]
   const images = report.hazard_images || []
+  const galleryImages = [
+    ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo" })),
+    ...inspectionPhotos.map((p) => ({ url: p.photo_url, label: "Inspector's Photo" })),
+  ]
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
@@ -671,7 +676,7 @@ export default function ReportDetail() {
               </h2>
               <button
                 type="button"
-                onClick={() => setLightboxImage(images[0].image_url)}
+                onClick={() => setLightboxIndex(0)}
                 className="block w-full"
               >
                 <img
@@ -682,11 +687,11 @@ export default function ReportDetail() {
               </button>
               {images.length > 1 && (
                 <div className="mt-2 grid grid-cols-4 gap-2">
-                  {images.slice(1).map((img) => (
+                  {images.slice(1).map((img, i) => (
                     <button
                       key={img.image_id}
                       type="button"
-                      onClick={() => setLightboxImage(img.image_url)}
+                      onClick={() => setLightboxIndex(i + 1)}
                       className="block"
                     >
                       <img
@@ -707,11 +712,11 @@ export default function ReportDetail() {
                 Inspector's Site Photos ({inspectionPhotos.length})
               </h2>
               <div className="grid grid-cols-4 gap-2">
-                {inspectionPhotos.map((p) => (
+                {inspectionPhotos.map((p, i) => (
                   <button
                     key={p.inspection_photo_id}
                     type="button"
-                    onClick={() => setLightboxImage(p.photo_url)}
+                    onClick={() => setLightboxIndex(images.length + i)}
                     className="block"
                   >
                     <img
@@ -909,6 +914,20 @@ export default function ReportDetail() {
                 </span>
                 <p className="text-xs text-gray-400">Assigned {formatDate(assignment.assigned_at)}</p>
 
+                {assignment.assignment_status === 'completed' && assignment.remarks && (
+                  <div className="mt-3 rounded-lg bg-gray-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                      Inspector's Findings
+                    </p>
+                    <p className="mt-1 text-sm text-gray-700">{assignment.remarks}</p>
+                    {assignment.completed_at && (
+                      <p className="mt-1.5 text-xs text-gray-400">
+                        Submitted {formatDate(assignment.completed_at)}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {assignment.assignment_status !== 'completed' && (
                   <div className="mt-3 space-y-2 border-t border-gray-100 pt-3">
                     <div className="flex gap-2">
@@ -1025,24 +1044,13 @@ export default function ReportDetail() {
         )}
       </div>
 
-      {lightboxImage && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
-          onClick={() => setLightboxImage(null)}
-        >
-          <button
-            onClick={() => setLightboxImage(null)}
-            className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
-          >
-            <X className="h-5 w-5" />
-          </button>
-          <img
-            src={lightboxImage}
-            alt=""
-            onClick={(e) => e.stopPropagation()}
-            className="max-h-full max-w-full rounded-lg object-contain"
-          />
-        </div>
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          images={galleryImages}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
       )}
     </div>
   )

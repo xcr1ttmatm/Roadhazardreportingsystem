@@ -4,12 +4,13 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, MapPin, Scan, Sparkles, Download, ImagePlus, X, Send, CheckCircle2,
+  ArrowLeft, Calendar, User, MapPin, Scan, Sparkles, Download, ImagePlus, X, Send, CheckCircle2, Pencil,
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
+import ImageLightbox from '../components/ImageLightbox'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -67,7 +68,10 @@ export default function InspectionDetail() {
   const [accepting, setAccepting] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [lightboxIndex, setLightboxIndex] = useState(null)
   const [findings, setFindings] = useState('')
+  const [editingFindings, setEditingFindings] = useState(false)
+  const [updatingFindings, setUpdatingFindings] = useState(false)
   const [newPhotoFiles, setNewPhotoFiles] = useState([])
   const [newPhotoPreviews, setNewPhotoPreviews] = useState([])
   const [correctingLocation, setCorrectingLocation] = useState(false)
@@ -262,6 +266,29 @@ export default function InspectionDetail() {
     }
   }
 
+  async function handleUpdateFindings() {
+    if (!findings.trim()) {
+      toast.error('Findings cannot be empty')
+      return
+    }
+    setUpdatingFindings(true)
+    try {
+      const { error } = await supabase
+        .from('inspector_assignments')
+        .update({ remarks: findings.trim(), updated_at: new Date().toISOString() })
+        .eq('assignment_id', assignment.assignment_id)
+
+      if (error) throw error
+      toast.success('Findings updated')
+      setEditingFindings(false)
+      await fetchAll()
+    } catch (err) {
+      toast.error(err.message || 'Could not update findings')
+    } finally {
+      setUpdatingFindings(false)
+    }
+  }
+
   if (loading) return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Loading...</p>
   if (!report) return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Report not found.</p>
   if (!assignment) {
@@ -273,7 +300,11 @@ export default function InspectionDetail() {
   }
 
   const position = [Number(report.latitude), Number(report.longitude)]
-  const image = report.hazard_images?.[0]?.image_url
+  const images = report.hazard_images || []
+  const galleryImages = [
+    ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo" })),
+    ...photos.map((p) => ({ url: p.photo_url, label: 'Your Site Photo' })),
+  ]
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
@@ -323,11 +354,52 @@ export default function InspectionDetail() {
           </div>
         ) : assignment.assignment_status === 'completed' ? (
           <div>
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
-              <CheckCircle2 className="h-4 w-4" />
-              Inspection completed {formatDate(assignment.completed_at)}
-            </p>
-            <p className="mt-2 text-sm text-gray-600">{assignment.remarks}</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
+                <CheckCircle2 className="h-4 w-4" />
+                Inspection completed {formatDate(assignment.completed_at)}
+              </p>
+              {!editingFindings && (
+                <button
+                  onClick={() => {
+                    setFindings(assignment.remarks || '')
+                    setEditingFindings(true)
+                  }}
+                  className="flex items-center gap-1 text-xs font-medium text-[#0F4C81] hover:underline"
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit Findings
+                </button>
+              )}
+            </div>
+
+            {editingFindings ? (
+              <div className="mt-2 space-y-2">
+                <textarea
+                  rows={4}
+                  value={findings}
+                  onChange={(e) => setFindings(e.target.value)}
+                  className="w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleUpdateFindings}
+                    disabled={updatingFindings}
+                    className="rounded-lg bg-[#0F4C81] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
+                  >
+                    {updatingFindings ? 'Saving...' : 'Save Changes'}
+                  </button>
+                  <button
+                    onClick={() => setEditingFindings(false)}
+                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-gray-600">{assignment.remarks}</p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-blue-700">Assignment accepted — conduct your site inspection below.</p>
@@ -337,7 +409,33 @@ export default function InspectionDetail() {
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Left: citizen's photo + description + reporter */}
         <div className="space-y-4">
-          {image && <img src={image} alt="" className="h-56 w-full rounded-2xl object-cover" />}
+          {images.length > 0 && (
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-3 text-sm font-semibold text-[#0F4C81]">
+                Citizen's Photos ({images.length})
+              </h2>
+              <button type="button" onClick={() => setLightboxIndex(0)} className="block w-full">
+                <img
+                  src={images[0].image_url}
+                  alt=""
+                  className="h-56 w-full cursor-zoom-in rounded-xl object-cover transition hover:opacity-90"
+                />
+              </button>
+              {images.length > 1 && (
+                <div className="mt-2 grid grid-cols-4 gap-2">
+                  {images.slice(1).map((img, i) => (
+                    <button key={img.image_id} type="button" onClick={() => setLightboxIndex(i + 1)}>
+                      <img
+                        src={img.image_url}
+                        alt=""
+                        className="h-16 w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
             <h2 className="text-sm font-semibold text-[#0F4C81]">Citizen's Description</h2>
@@ -486,8 +584,14 @@ export default function InspectionDetail() {
 
                 {photos.length > 0 && (
                   <div className="mt-3 grid grid-cols-3 gap-2">
-                    {photos.map((p) => (
-                      <img key={p.inspection_photo_id} src={p.photo_url} alt="" className="aspect-square rounded-lg object-cover" />
+                    {photos.map((p, i) => (
+                      <button key={p.inspection_photo_id} type="button" onClick={() => setLightboxIndex(images.length + i)}>
+                        <img
+                          src={p.photo_url}
+                          alt=""
+                          className="aspect-square w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                        />
+                      </button>
                     ))}
                   </div>
                 )}
@@ -568,6 +672,15 @@ export default function InspectionDetail() {
           )}
         </div>
       </div>
+
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          images={galleryImages}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </div>
   )
 }
