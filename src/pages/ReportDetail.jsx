@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil,
+  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil, Trash2, X,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER } from '../lib/mapConfig'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
+import { deleteHazardReport } from '../lib/deleteReport'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -53,6 +54,7 @@ function formatHazardType(type) {
 
 export default function ReportDetail() {
   const { reportId } = useParams()
+  const navigate = useNavigate()
   const [report, setReport] = useState(null)
   const [detection, setDetection] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -74,6 +76,10 @@ export default function ReportDetail() {
   const [savingDescription, setSavingDescription] = useState(false)
   const [reassigning, setReassigning] = useState(false)
   const [reassignSelection, setReassignSelection] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  const [lightboxImage, setLightboxImage] = useState(null)
 
   async function fetchReport() {
     const { data, error } = await supabase
@@ -450,6 +456,25 @@ export default function ReportDetail() {
   }
 
 
+  async function handleDeleteReport() {
+    if (!deleteReason.trim()) {
+      toast.error('Please give a reason so the citizen understands why')
+      return
+    }
+    setDeleting(true)
+    try {
+      const { error } = await deleteHazardReport(report, { notifyUser: true, reason: deleteReason.trim() })
+      if (error) throw error
+      toast.success('Report deleted')
+      navigate('/admin/reports')
+    } catch (err) {
+      console.error(err)
+      toast.error(err.message || 'Could not delete report')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (loading) {
     return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Loading report...</p>
   }
@@ -640,20 +665,63 @@ export default function ReportDetail() {
         {/* Left: photo + description */}
         <div className="space-y-4">
           {images.length > 0 && (
-            <div>
-              <img src={images[0].image_url} alt="" className="h-64 w-full rounded-2xl object-cover" />
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-3 text-sm font-semibold text-[#0F4C81]">
+                Citizen's Photos ({images.length})
+              </h2>
+              <button
+                type="button"
+                onClick={() => setLightboxImage(images[0].image_url)}
+                className="block w-full"
+              >
+                <img
+                  src={images[0].image_url}
+                  alt=""
+                  className="h-64 w-full cursor-zoom-in rounded-xl object-cover transition hover:opacity-90"
+                />
+              </button>
               {images.length > 1 && (
                 <div className="mt-2 grid grid-cols-4 gap-2">
                   {images.slice(1).map((img) => (
-                    <img
+                    <button
                       key={img.image_id}
-                      src={img.image_url}
-                      alt=""
-                      className="h-16 w-full rounded-lg object-cover"
-                    />
+                      type="button"
+                      onClick={() => setLightboxImage(img.image_url)}
+                      className="block"
+                    >
+                      <img
+                        src={img.image_url}
+                        alt=""
+                        className="h-16 w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                      />
+                    </button>
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {inspectionPhotos.length > 0 && (
+            <div className="rounded-2xl border border-gray-200 bg-white p-5">
+              <h2 className="mb-3 text-sm font-semibold text-[#0F4C81]">
+                Inspector's Site Photos ({inspectionPhotos.length})
+              </h2>
+              <div className="grid grid-cols-4 gap-2">
+                {inspectionPhotos.map((p) => (
+                  <button
+                    key={p.inspection_photo_id}
+                    type="button"
+                    onClick={() => setLightboxImage(p.photo_url)}
+                    className="block"
+                  >
+                    <img
+                      src={p.photo_url}
+                      alt=""
+                      className="aspect-square w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                    />
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -911,6 +979,71 @@ export default function ReportDetail() {
           </div>
         </div>
       </div>
+
+      {/* Danger zone */}
+      <div className="mt-6 rounded-2xl border border-red-100 bg-red-50/50 p-5">
+        <h2 className="text-sm font-semibold text-[#CE1126]">Danger Zone</h2>
+        {confirmDelete ? (
+          <div className="mt-3 space-y-2">
+            <label className="block text-xs font-medium text-[#CE1126]">
+              Reason for deletion (the citizen will see this)
+            </label>
+            <textarea
+              rows={2}
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="e.g. duplicate report, spam, not an actual road hazard"
+              className="w-full resize-none rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-[#0F4C81] focus:border-[#CE1126] focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleDeleteReport}
+                disabled={deleting}
+                className="rounded-lg bg-[#CE1126] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#A50E1F] disabled:opacity-60"
+              >
+                {deleting ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmDelete(false)
+                  setDeleteReason('')
+                }}
+                className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-white"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="mt-2 flex items-center gap-1.5 text-sm font-medium text-[#CE1126] hover:underline"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete This Report
+          </button>
+        )}
+      </div>
+
+      {lightboxImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6"
+          onClick={() => setLightboxImage(null)}
+        >
+          <button
+            onClick={() => setLightboxImage(null)}
+            className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+          >
+            <X className="h-5 w-5" />
+          </button>
+          <img
+            src={lightboxImage}
+            alt=""
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-full max-w-full rounded-lg object-contain"
+          />
+        </div>
+      )}
     </div>
   )
 }

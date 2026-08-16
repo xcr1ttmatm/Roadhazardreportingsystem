@@ -1,6 +1,7 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { ShieldAlert, LayoutDashboard, ClipboardList, Users, Map, LogOut } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
+import NotificationBell from '../components/NotificationBell'
 
 const navItems = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -46,6 +47,7 @@ export default function AdminLayout() {
           </nav>
 
           <div className="flex items-center gap-3">
+            <NotificationBell />
             <span className="hidden text-sm text-gray-500 sm:inline">Hi, {profile?.username}</span>
             <button
               onClick={signOut}

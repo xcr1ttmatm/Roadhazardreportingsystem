@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
-import { MapPin, Calendar, ChevronDown } from 'lucide-react'
+import { MapPin, Calendar, ChevronDown, Trash2 } from 'lucide-react'
 import { getDisplayPosition, hasVerifiedLocation } from '../lib/reportLocation'
+import { deleteHazardReport } from '../lib/deleteReport'
+import toast from 'react-hot-toast'
 
 const STATUS_STYLES = {
   pending: 'bg-gray-100 text-gray-600',
@@ -35,6 +37,8 @@ export default function TrackReports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState(null)
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -52,6 +56,21 @@ export default function TrackReports() {
 
     fetchReports()
   }, [user])
+
+  async function handleDelete(report) {
+    setDeleting(true)
+    try {
+      const { error } = await deleteHazardReport(report)
+      if (error) throw error
+      toast.success('Report deleted')
+      setReports((prev) => prev.filter((r) => r.report_id !== report.report_id))
+      setConfirmDeleteId(null)
+    } catch (err) {
+      toast.error(err.message || 'Could not delete report')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-8">
@@ -138,6 +157,37 @@ export default function TrackReports() {
                         done={!!report.approved_at}
                       />
                     </div>
+
+                    {(report.status === 'pending' || report.status === 'rejected') && (
+                      <div className="mt-4 border-t border-gray-100 pt-3">
+                        {confirmDeleteId === report.report_id ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">Delete this report permanently?</span>
+                            <button
+                              onClick={() => handleDelete(report)}
+                              disabled={deleting}
+                              className="rounded-lg bg-[#CE1126] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[#A50E1F] disabled:opacity-60"
+                            >
+                              {deleting ? 'Deleting...' : 'Yes, delete'}
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDeleteId(report.report_id)}
+                            className="flex items-center gap-1 text-xs font-medium text-[#CE1126] hover:underline"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete Report
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
