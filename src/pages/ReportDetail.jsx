@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil, Trash2,
+  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil, Trash2, ImagePlus,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER } from '../lib/mapConfig'
@@ -78,6 +78,9 @@ export default function ReportDetail() {
   const [reassigning, setReassigning] = useState(false)
   const [reassignSelection, setReassignSelection] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [showResolvePanel, setShowResolvePanel] = useState(false)
+  const [resolvePhotoFile, setResolvePhotoFile] = useState(null)
+  const [resolvePhotoPreview, setResolvePhotoPreview] = useState(null)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -364,6 +367,13 @@ export default function ReportDetail() {
     }
   }
 
+  function handleResolvePhotoSelect(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setResolvePhotoFile(file)
+    setResolvePhotoPreview(URL.createObjectURL(file))
+  }
+
   async function handleMarkResolved() {
     setDecisionLoading(true)
     try {
@@ -371,13 +381,31 @@ export default function ReportDetail() {
         data: { user },
       } = await supabase.auth.getUser()
 
+      let resolvedImageUrl = null
+      if (resolvePhotoFile) {
+        const ext = resolvePhotoFile.name.split('.').pop()
+        const path = `${user.id}/resolved-${report.report_id}-${Date.now()}.${ext}`
+        const { error: uploadError } = await supabase.storage.from('hazard-images').upload(path, resolvePhotoFile)
+        if (uploadError) throw uploadError
+        const { data: urlData } = supabase.storage.from('hazard-images').getPublicUrl(path)
+        resolvedImageUrl = urlData.publicUrl
+      }
+
       const { error } = await supabase
         .from('hazard_reports')
-        .update({ status: 'resolved', resolved_by: user.id, resolved_at: new Date().toISOString() })
+        .update({
+          status: 'resolved',
+          resolved_by: user.id,
+          resolved_at: new Date().toISOString(),
+          resolved_image_url: resolvedImageUrl,
+        })
         .eq('report_id', report.report_id)
 
       if (error) throw error
       toast.success('Marked as resolved')
+      setShowResolvePanel(false)
+      setResolvePhotoFile(null)
+      setResolvePhotoPreview(null)
       await fetchReport()
     } catch (err) {
       console.error(err)
@@ -561,29 +589,78 @@ export default function ReportDetail() {
             </button>
           </div>
         ) : report.status === 'approved' ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
-              <CheckCircle2 className="h-4 w-4" />
-              Approved — visible on the public Hazard Map
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={handleMarkResolved}
-                disabled={decisionLoading}
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Mark as Resolved
-              </button>
-              <button
-                onClick={handleUndoDecision}
-                disabled={decisionLoading}
-                className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:opacity-60"
-              >
-                <Undo2 className="h-3.5 w-3.5" />
-                Undo
-              </button>
+          <div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
+                <CheckCircle2 className="h-4 w-4" />
+                Approved — visible on the public Hazard Map
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowResolvePanel((s) => !s)}
+                  disabled={decisionLoading}
+                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Mark as Resolved
+                </button>
+                <button
+                  onClick={handleUndoDecision}
+                  disabled={decisionLoading}
+                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  Undo
+                </button>
+              </div>
             </div>
+
+            {showResolvePanel && (
+              <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
+                <p className="text-xs font-medium text-gray-500">
+                  Optional — upload a photo of the repaired road. This will show as the "After" photo on the
+                  Hazard Map.
+                </p>
+                {resolvePhotoPreview ? (
+                  <img src={resolvePhotoPreview} alt="" className="mt-3 h-40 w-full rounded-lg object-cover" />
+                ) : (
+                  <label
+                    htmlFor="resolve-photo"
+                    className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-6 text-center transition hover:border-emerald-500"
+                  >
+                    <ImagePlus className="h-6 w-6 text-gray-400" />
+                    <span className="text-xs text-gray-500">Click to add an after-repair photo</span>
+                  </label>
+                )}
+                <input
+                  id="resolve-photo"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleResolvePhotoSelect}
+                  className="hidden"
+                />
+
+                <div className="mt-3 flex gap-2">
+                  <button
+                    onClick={handleMarkResolved}
+                    disabled={decisionLoading}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {decisionLoading ? 'Saving...' : 'Confirm Resolved'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowResolvePanel(false)
+                      setResolvePhotoFile(null)
+                      setResolvePhotoPreview(null)
+                    }}
+                    className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div>
@@ -916,6 +993,22 @@ export default function ReportDetail() {
 
                 {assignment.assignment_status === 'completed' && assignment.remarks && (
                   <div className="mt-3 rounded-lg bg-gray-50 p-3">
+                    {assignment.inspector_decision && (
+                      <span
+                        className={`mb-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          assignment.inspector_decision === 'approve'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-red-100 text-[#CE1126]'
+                        }`}
+                      >
+                        {assignment.inspector_decision === 'approve' ? (
+                          <CheckCircle2 className="h-3 w-3" />
+                        ) : (
+                          <XCircle className="h-3 w-3" />
+                        )}
+                        Inspector recommends: {assignment.inspector_decision === 'approve' ? 'Approve' : 'Reject'}
+                      </span>
+                    )}
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
                       Inspector's Findings
                     </p>
@@ -925,6 +1018,10 @@ export default function ReportDetail() {
                         Submitted {formatDate(assignment.completed_at)}
                       </p>
                     )}
+                    <p className="mt-2 text-[11px] italic text-gray-400">
+                      This is a supporting recommendation only — your Approve/Reject decision below determines
+                      Hazard Map visibility.
+                    </p>
                   </div>
                 )}
 

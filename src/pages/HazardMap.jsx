@@ -7,6 +7,46 @@ import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../l
 import { SEVERITY_COLORS } from '../lib/severity'
 import { getDisplayPosition } from '../lib/reportLocation'
 
+// Shows the "After" repair photo by default for resolved hazards, with a
+// small toggle to compare against the original "Before" photo.
+function PopupImage({ report }) {
+  const beforeUrl = report.featured_image_url || report.hazard_images?.[0]?.image_url
+  const afterUrl = report.resolved_image_url
+  const hasBothPhotos = report.status === 'resolved' && beforeUrl && afterUrl
+
+  const [showingAfter, setShowingAfter] = useState(true)
+
+  if (!hasBothPhotos) {
+    return beforeUrl ? <img src={beforeUrl} alt="" className="mb-2 h-28 w-full rounded-lg object-cover" /> : null
+  }
+
+  return (
+    <div className="mb-2">
+      <img
+        src={showingAfter ? afterUrl : beforeUrl}
+        alt=""
+        className="h-28 w-full rounded-lg object-cover"
+      />
+      <div className="mt-1 flex overflow-hidden rounded-md border border-gray-200 text-[10px] font-medium">
+        <button
+          type="button"
+          onClick={() => setShowingAfter(false)}
+          className={`flex-1 py-1 transition ${!showingAfter ? 'bg-[#0F4C81] text-white' : 'bg-white text-gray-500'}`}
+        >
+          Before
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowingAfter(true)}
+          className={`flex-1 py-1 transition ${showingAfter ? 'bg-emerald-600 text-white' : 'bg-white text-gray-500'}`}
+        >
+          After
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function severityIcon(severity, status) {
   const color = status === 'resolved' ? '#16A34A' : SEVERITY_COLORS[severity?.toLowerCase()] || SEVERITY_COLORS.default
   return L.divIcon({
@@ -75,13 +115,7 @@ export default function HazardMap() {
             >
               <Popup>
                 <div className="w-52">
-                  {(report.featured_image_url || report.hazard_images?.[0]?.image_url) && (
-                    <img
-                      src={report.featured_image_url || report.hazard_images[0].image_url}
-                      alt=""
-                      className="mb-2 h-28 w-full rounded-lg object-cover"
-                    />
-                  )}
+                  <PopupImage report={report} />
                   <p className="text-sm font-semibold text-[#0F4C81]">
                     {report.title || 'Road hazard'}
                   </p>
@@ -106,6 +140,12 @@ export default function HazardMap() {
                     <div className="mt-2 flex items-center gap-1 text-[11px] text-gray-400">
                       <Calendar className="h-3 w-3" />
                       Approved {formatDate(report.approved_at)}
+                    </div>
+                  )}
+                  {report.status === 'resolved' && report.resolved_at && (
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-emerald-600">
+                      <Calendar className="h-3 w-3" />
+                      Repaired {formatDate(report.resolved_at)}
                     </div>
                   )}
                 </div>

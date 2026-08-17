@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, MapPin, Scan, Sparkles, Download, ImagePlus, X, Send, CheckCircle2, Pencil,
+  ArrowLeft, Calendar, User, MapPin, Scan, Sparkles, Download, ImagePlus, X, Send, CheckCircle2, Pencil, XCircle,
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -70,6 +70,7 @@ export default function InspectionDetail() {
   const [submitting, setSubmitting] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
   const [findings, setFindings] = useState('')
+  const [decision, setDecision] = useState(null)
   const [editingFindings, setEditingFindings] = useState(false)
   const [updatingFindings, setUpdatingFindings] = useState(false)
   const [newPhotoFiles, setNewPhotoFiles] = useState([])
@@ -186,6 +187,10 @@ export default function InspectionDetail() {
   }
 
   async function handleSubmitFindings() {
+    if (!decision) {
+      toast.error('Choose whether you recommend approving or rejecting this report')
+      return
+    }
     if (!findings.trim()) {
       toast.error('Please describe your site inspection findings')
       return
@@ -194,10 +199,20 @@ export default function InspectionDetail() {
     try {
       const { error: assignError } = await supabase
         .from('inspector_assignments')
-        .update({ assignment_status: 'completed', completed_at: new Date().toISOString(), remarks: findings.trim() })
+        .update({
+          assignment_status: 'completed',
+          completed_at: new Date().toISOString(),
+          remarks: findings.trim(),
+          inspector_decision: decision,
+        })
         .eq('assignment_id', assignment.assignment_id)
       if (assignError) throw assignError
 
+      // Status always becomes "verified" here, regardless of the inspector's
+      // own recommendation. The admin makes the actual approve/reject call
+      // that determines Hazard Map visibility — this just marks on-site
+      // inspection as complete and ready for the admin's review, with the
+      // inspector's opinion attached as supporting context (not a decision).
       const { error: reportError } = await supabase
         .from('hazard_reports')
         .update({ status: 'verified', verified_by: user.id, verified_at: new Date().toISOString() })
@@ -267,6 +282,10 @@ export default function InspectionDetail() {
   }
 
   async function handleUpdateFindings() {
+    if (!decision) {
+      toast.error('Choose whether you recommend approving or rejecting this report')
+      return
+    }
     if (!findings.trim()) {
       toast.error('Findings cannot be empty')
       return
@@ -275,7 +294,7 @@ export default function InspectionDetail() {
     try {
       const { error } = await supabase
         .from('inspector_assignments')
-        .update({ remarks: findings.trim(), updated_at: new Date().toISOString() })
+        .update({ remarks: findings.trim(), inspector_decision: decision, updated_at: new Date().toISOString() })
         .eq('assignment_id', assignment.assignment_id)
 
       if (error) throw error
@@ -363,6 +382,7 @@ export default function InspectionDetail() {
                 <button
                   onClick={() => {
                     setFindings(assignment.remarks || '')
+                    setDecision(assignment.inspector_decision || null)
                     setEditingFindings(true)
                   }}
                   className="flex items-center gap-1 text-xs font-medium text-[#0F4C81] hover:underline"
@@ -373,8 +393,51 @@ export default function InspectionDetail() {
               )}
             </div>
 
+            {!editingFindings && assignment.inspector_decision && (
+              <span
+                className={`mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                  assignment.inspector_decision === 'approve'
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-red-100 text-[#CE1126]'
+                }`}
+              >
+                {assignment.inspector_decision === 'approve' ? (
+                  <CheckCircle2 className="h-3 w-3" />
+                ) : (
+                  <XCircle className="h-3 w-3" />
+                )}
+                You recommended: {assignment.inspector_decision === 'approve' ? 'Approve' : 'Reject'}
+              </span>
+            )}
+
             {editingFindings ? (
               <div className="mt-2 space-y-2">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setDecision('approve')}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
+                      decision === 'approve'
+                        ? 'border-green-600 bg-green-50 text-green-700'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                    }`}
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Recommend Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDecision('reject')}
+                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
+                      decision === 'reject'
+                        ? 'border-[#CE1126] bg-red-50 text-[#CE1126]'
+                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                    }`}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    Recommend Reject
+                  </button>
+                </div>
                 <textarea
                   rows={4}
                   value={findings}
@@ -651,12 +714,48 @@ export default function InspectionDetail() {
               {assignment.assignment_status !== 'completed' && (
                 <div className="rounded-2xl border border-gray-200 bg-white p-5">
                   <h2 className="text-sm font-semibold text-[#0F4C81]">Verification Findings</h2>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Your recommendation and remarks — the admin makes the final call on whether this goes on the
+                    Hazard Map.
+                  </p>
+
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDecision('approve')}
+                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
+                        decision === 'approve'
+                          ? 'border-green-600 bg-green-50 text-green-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      Recommend Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecision('reject')}
+                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
+                        decision === 'reject'
+                          ? 'border-[#CE1126] bg-red-50 text-[#CE1126]'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      <XCircle className="h-4 w-4" />
+                      Recommend Reject
+                    </button>
+                  </div>
+
                   <textarea
                     rows={4}
                     value={findings}
                     onChange={(e) => setFindings(e.target.value)}
-                    placeholder="Describe what you found on-site — does it match the citizen's report? Severity confirmed? Recommended repair?"
-                    className="mt-2 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
+                    placeholder={
+                      decision === 'reject'
+                        ? 'Explain why — e.g. no road damage found at this location, does not match the photo'
+                        : "Describe what you found on-site — does it match the citizen's report? Severity confirmed? Recommended repair?"
+                    }
+                    className="mt-3 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
                   />
                   <button
                     onClick={handleSubmitFindings}
