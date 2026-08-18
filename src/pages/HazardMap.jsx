@@ -6,43 +6,78 @@ import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
 import { SEVERITY_COLORS } from '../lib/severity'
 import { getDisplayPosition } from '../lib/reportLocation'
+import ImageLightbox from '../components/ImageLightbox'
+
+// Builds the Before/After photo sets for a report. "Before" leads with
+// whichever photo the admin picked as featured at approval time; "After"
+// comes from resolved_images, falling back to the older single
+// resolved_image_url pointer for reports resolved before that table existed.
+function getBeforeAfterImages(report) {
+  const rawBefore = report.featured_image_url
+    ? [report.featured_image_url, ...(report.hazard_images || []).map((i) => i.image_url).filter((u) => u !== report.featured_image_url)]
+    : (report.hazard_images || []).map((i) => i.image_url)
+
+  const rawAfter =
+    report.resolved_images && report.resolved_images.length > 0
+      ? report.resolved_images.map((i) => i.image_url)
+      : report.resolved_image_url
+        ? [report.resolved_image_url]
+        : []
+
+  return {
+    before: rawBefore.map((url) => ({ url, label: 'Before' })),
+    after: rawAfter.map((url) => ({ url, label: 'After' })),
+  }
+}
 
 // Shows the "After" repair photo by default for resolved hazards, with a
-// small toggle to compare against the original "Before" photo.
-function PopupImage({ report }) {
-  const beforeUrl = report.featured_image_url || report.hazard_images?.[0]?.image_url
-  const afterUrl = report.resolved_image_url
-  const hasBothPhotos = report.status === 'resolved' && beforeUrl && afterUrl
+// toggle to compare against the original "Before" photo. Click the photo
+// to open it full-size and zoomable via the shared lightbox.
+function PopupImage({ report, onOpenLightbox }) {
+  const { before, after } = getBeforeAfterImages(report)
+  const hasBoth = report.status === 'resolved' && before.length > 0 && after.length > 0
 
   const [showingAfter, setShowingAfter] = useState(true)
 
-  if (!hasBothPhotos) {
-    return beforeUrl ? <img src={beforeUrl} alt="" className="mb-2 h-28 w-full rounded-lg object-cover" /> : null
+  const activeSet = hasBoth ? (showingAfter ? after : before) : before.length > 0 ? before : after
+  if (activeSet.length === 0) return null
+
+  function handleClick() {
+    const combined = [...before, ...after]
+    const startIndex = hasBoth && showingAfter ? before.length : 0
+    onOpenLightbox(combined, startIndex)
   }
 
   return (
     <div className="mb-2">
-      <img
-        src={showingAfter ? afterUrl : beforeUrl}
-        alt=""
-        className="h-28 w-full rounded-lg object-cover"
-      />
-      <div className="mt-1 flex overflow-hidden rounded-md border border-gray-200 text-[10px] font-medium">
-        <button
-          type="button"
-          onClick={() => setShowingAfter(false)}
-          className={`flex-1 py-1 transition ${!showingAfter ? 'bg-[#0F4C81] text-white' : 'bg-white text-gray-500'}`}
-        >
-          Before
-        </button>
-        <button
-          type="button"
-          onClick={() => setShowingAfter(true)}
-          className={`flex-1 py-1 transition ${showingAfter ? 'bg-emerald-600 text-white' : 'bg-white text-gray-500'}`}
-        >
-          After
-        </button>
-      </div>
+      <button type="button" onClick={handleClick} className="block w-full">
+        <img
+          src={activeSet[0].url}
+          alt=""
+          className="h-28 w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-90"
+        />
+      </button>
+      {(before.length > 1 || after.length > 1) && (
+        <p className="mt-1 text-center text-[10px] text-gray-400">Click photo to view all & zoom</p>
+      )}
+      {hasBoth && (
+        <div className="mt-1 flex overflow-hidden rounded-md border border-gray-200 text-[10px] font-medium">
+          <button
+            type="button"
+            onClick={() => setShowingAfter(false)}
+            className={`flex-1 py-1 transition ${!showingAfter ? 'bg-[#0F4C81] text-white' : 'bg-white text-gray-500'}`}
+          >
+            Before
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowingAfter(true)}
+            className={`flex-1 py-1 transition ${showingAfter ? 'bg-emerald-600 text-white' : 'bg-white text-gray-500'}`}
+          >
+            After
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -70,12 +105,13 @@ function formatDate(dateString) {
 export default function HazardMap() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
+  const [lightbox, setLightbox] = useState(null) // { images, index } | null
 
   useEffect(() => {
     async function fetchApprovedReports() {
       const { data, error } = await supabase
         .from('hazard_reports')
-        .select('*, hazard_images(image_url)')
+        .select('*, hazard_images(image_url), resolved_images(image_url)')
         .in('status', ['approved', 'resolved'])
 
       if (!error) setReports(data)
@@ -115,7 +151,10 @@ export default function HazardMap() {
             >
               <Popup>
                 <div className="w-52">
-                  <PopupImage report={report} />
+                  <PopupImage
+                    report={report}
+                    onOpenLightbox={(images, index) => setLightbox({ images, index })}
+                  />
                   <p className="text-sm font-semibold text-[#0F4C81]">
                     {report.title || 'Road hazard'}
                   </p>
@@ -170,6 +209,15 @@ export default function HazardMap() {
         <p className="mt-4 text-center text-sm text-gray-400">
           No approved hazards yet — once the LGU approves reports, they'll appear here.
         </p>
+      )}
+
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          index={lightbox.index}
+          onIndexChange={(i) => setLightbox({ ...lightbox, index: i })}
+          onClose={() => setLightbox(null)}
+        />
       )}
     </div>
   )

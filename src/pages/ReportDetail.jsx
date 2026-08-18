@@ -79,8 +79,9 @@ export default function ReportDetail() {
   const [reassignSelection, setReassignSelection] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [showResolvePanel, setShowResolvePanel] = useState(false)
-  const [resolvePhotoFile, setResolvePhotoFile] = useState(null)
-  const [resolvePhotoPreview, setResolvePhotoPreview] = useState(null)
+  const [resolvePhotoFiles, setResolvePhotoFiles] = useState([])
+  const [resolvePhotoPreviews, setResolvePhotoPreviews] = useState([])
+  const [resolvedImages, setResolvedImages] = useState([])
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
@@ -140,7 +141,14 @@ export default function ReportDetail() {
   }
 
   useEffect(() => {
-    Promise.all([fetchReport(), fetchLatestDetection(), fetchInspectors(), fetchAssignment(), fetchInspectionPhotos()]).finally(
+    Promise.all([
+      fetchReport(),
+      fetchLatestDetection(),
+      fetchInspectors(),
+      fetchAssignment(),
+      fetchInspectionPhotos(),
+      fetchResolvedImages(),
+    ]).finally(
       () => setLoading(false)
     )
   }, [reportId])
@@ -367,11 +375,37 @@ export default function ReportDetail() {
     }
   }
 
+  const MAX_RESOLVE_PHOTOS = 5
+
   function handleResolvePhotoSelect(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setResolvePhotoFile(file)
-    setResolvePhotoPreview(URL.createObjectURL(file))
+    const newFiles = Array.from(e.target.files || [])
+    if (newFiles.length === 0) return
+
+    const remaining = MAX_RESOLVE_PHOTOS - resolvePhotoFiles.length
+    if (remaining <= 0) {
+      toast.error(`Maximum ${MAX_RESOLVE_PHOTOS} photos allowed`)
+      e.target.value = ''
+      return
+    }
+    const filesToAdd = newFiles.slice(0, remaining)
+    setResolvePhotoFiles((prev) => [...prev, ...filesToAdd])
+    setResolvePhotoPreviews((prev) => [...prev, ...filesToAdd.map((f) => URL.createObjectURL(f))])
+    e.target.value = ''
+  }
+
+  function removeResolvePhoto(index) {
+    setResolvePhotoFiles((prev) => prev.filter((_, i) => i !== index))
+    setResolvePhotoPreviews((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  async function fetchResolvedImages() {
+    const { data, error } = await supabase
+      .from('resolved_images')
+      .select('*')
+      .eq('report_id', reportId)
+      .order('uploaded_at')
+
+    if (!error) setResolvedImages(data || [])
   }
 
   async function handleMarkResolved() {
@@ -381,14 +415,15 @@ export default function ReportDetail() {
         data: { user },
       } = await supabase.auth.getUser()
 
-      let resolvedImageUrl = null
-      if (resolvePhotoFile) {
-        const ext = resolvePhotoFile.name.split('.').pop()
-        const path = `${user.id}/resolved-${report.report_id}-${Date.now()}.${ext}`
-        const { error: uploadError } = await supabase.storage.from('hazard-images').upload(path, resolvePhotoFile)
+      const uploadedUrls = []
+      for (let i = 0; i < resolvePhotoFiles.length; i++) {
+        const file = resolvePhotoFiles[i]
+        const ext = file.name.split('.').pop()
+        const path = `${user.id}/resolved-${report.report_id}-${Date.now()}-${i}.${ext}`
+        const { error: uploadError } = await supabase.storage.from('hazard-images').upload(path, file)
         if (uploadError) throw uploadError
         const { data: urlData } = supabase.storage.from('hazard-images').getPublicUrl(path)
-        resolvedImageUrl = urlData.publicUrl
+        uploadedUrls.push(urlData.publicUrl)
       }
 
       const { error } = await supabase
@@ -397,16 +432,27 @@ export default function ReportDetail() {
           status: 'resolved',
           resolved_by: user.id,
           resolved_at: new Date().toISOString(),
-          resolved_image_url: resolvedImageUrl,
+          // Kept in sync as a quick "primary after photo" pointer for places
+          // (like the PDF export) that just want one representative image —
+          // the full set lives in resolved_images below.
+          resolved_image_url: uploadedUrls[0] || null,
         })
         .eq('report_id', report.report_id)
 
       if (error) throw error
+
+      if (uploadedUrls.length > 0) {
+        const { error: insertError } = await supabase
+          .from('resolved_images')
+          .insert(uploadedUrls.map((url) => ({ report_id: report.report_id, image_url: url })))
+        if (insertError) throw insertError
+      }
+
       toast.success('Marked as resolved')
       setShowResolvePanel(false)
-      setResolvePhotoFile(null)
-      setResolvePhotoPreview(null)
-      await fetchReport()
+      setResolvePhotoFiles([])
+      setResolvePhotoPreviews([])
+      await Promise.all([fetchReport(), fetchResolvedImages()])
     } catch (err) {
       console.error(err)
       toast.error(err.message || 'Could not mark as resolved')
@@ -519,6 +565,7 @@ export default function ReportDetail() {
   const galleryImages = [
     ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo" })),
     ...inspectionPhotos.map((p) => ({ url: p.photo_url, label: "Inspector's Photo" })),
+    ...resolvedImages.map((img) => ({ url: img.image_url, label: 'After Repair' })),
   ]
 
   return (
@@ -618,24 +665,45 @@ export default function ReportDetail() {
             {showResolvePanel && (
               <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
                 <p className="text-xs font-medium text-gray-500">
-                  Optional — upload a photo of the repaired road. This will show as the "After" photo on the
-                  Hazard Map.
+                  Optional — upload up to {MAX_RESOLVE_PHOTOS} photos of the repaired road. These show as the
+                  "After" photos on the Hazard Map.
                 </p>
-                {resolvePhotoPreview ? (
-                  <img src={resolvePhotoPreview} alt="" className="mt-3 h-40 w-full rounded-lg object-cover" />
-                ) : (
+
+                {resolvePhotoPreviews.length > 0 && (
+                  <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    {resolvePhotoPreviews.map((src, i) => (
+                      <div key={src} className="group relative aspect-square overflow-hidden rounded-lg">
+                        <img src={src} alt="" className="h-full w-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => removeResolvePhoto(i)}
+                          className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition group-hover:opacity-100"
+                        >
+                          <XCircle className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {resolvePhotoFiles.length < MAX_RESOLVE_PHOTOS && (
                   <label
                     htmlFor="resolve-photo"
                     className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-gray-300 bg-white px-4 py-6 text-center transition hover:border-emerald-500"
                   >
                     <ImagePlus className="h-6 w-6 text-gray-400" />
-                    <span className="text-xs text-gray-500">Click to add an after-repair photo</span>
+                    <span className="text-xs text-gray-500">
+                      {resolvePhotoFiles.length === 0
+                        ? 'Click to add after-repair photos'
+                        : `Add more (${MAX_RESOLVE_PHOTOS - resolvePhotoFiles.length} remaining)`}
+                    </span>
                   </label>
                 )}
                 <input
                   id="resolve-photo"
                   type="file"
                   accept="image/*"
+                  multiple
                   onChange={handleResolvePhotoSelect}
                   className="hidden"
                 />
@@ -651,8 +719,8 @@ export default function ReportDetail() {
                   <button
                     onClick={() => {
                       setShowResolvePanel(false)
-                      setResolvePhotoFile(null)
-                      setResolvePhotoPreview(null)
+                      setResolvePhotoFiles([])
+                      setResolvePhotoPreviews([])
                     }}
                     className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
                   >
@@ -798,6 +866,30 @@ export default function ReportDetail() {
                   >
                     <img
                       src={p.photo_url}
+                      alt=""
+                      className="aspect-square w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {resolvedImages.length > 0 && (
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-5">
+              <h2 className="mb-3 text-sm font-semibold text-emerald-700">
+                After Repair Photos ({resolvedImages.length})
+              </h2>
+              <div className="grid grid-cols-4 gap-2">
+                {resolvedImages.map((img, i) => (
+                  <button
+                    key={img.resolved_image_id}
+                    type="button"
+                    onClick={() => setLightboxIndex(images.length + inspectionPhotos.length + i)}
+                    className="block"
+                  >
+                    <img
+                      src={img.image_url}
                       alt=""
                       className="aspect-square w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
                     />
