@@ -11,7 +11,9 @@ import { CITY_CENTER } from '../lib/mapConfig'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
 import { deleteHazardReport } from '../lib/deleteReport'
+import { runHazardDetection } from '../lib/hazardDetection'
 import ImageLightbox from '../components/ImageLightbox'
+import DetectionBoxes, { DetectionPreview, effectiveShowWeak } from '../components/DetectionBoxes'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -85,6 +87,7 @@ export default function ReportDetail() {
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
+  const [showWeakBoxes, setShowWeakBoxes] = useState(false)
 
   async function fetchReport() {
     const { data, error } = await supabase
@@ -154,29 +157,32 @@ export default function ReportDetail() {
   }, [reportId])
 
   async function handleRunDetection() {
-    const primaryImage = report?.hazard_images?.[0]
-    if (!primaryImage?.image_url) {
+    if (!report?.hazard_images?.[0]?.image_url) {
       toast.error('This report has no image to analyze')
       return
     }
 
     setDetecting(true)
+    let loadingToast = toast.loading('Running your trained model (the first run downloads it, so it can take a moment)...')
     try {
-      const { data, error } = await supabase.functions.invoke('detect-hazard', {
-        body: {
-          reportId: report.report_id,
-          imageId: primaryImage.image_id,
-          imageUrl: primaryImage.image_url,
+      const { source, detection: result, fallbackReason } = await runHazardDetection(report, supabase, {
+        onStatus: (stage) => {
+          if (stage === 'fallback') toast.loading('Using Gemini for this one...', { id: loadingToast })
         },
       })
+      toast.dismiss(loadingToast)
+      loadingToast = null
 
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
-
-      toast.success('Hazard detection complete')
-      setDetection(data.detection)
+      if (source === 'yolov8_local') {
+        toast.success('Detected with your trained YOLOv8 model')
+      } else {
+        toast.success('Detected with Gemini (fallback)')
+        if (fallbackReason) toast(fallbackReason, { icon: 'ℹ️', duration: 12000 })
+      }
+      setDetection(result)
       await fetchReport()
     } catch (err) {
+      if (loadingToast) toast.dismiss(loadingToast)
       console.error(err)
       toast.error(err.message || 'Detection failed')
     } finally {
@@ -563,10 +569,14 @@ export default function ReportDetail() {
     : [Number(report.latitude), Number(report.longitude)]
   const images = report.hazard_images || []
   const galleryImages = [
-    ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo" })),
+    ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo", imageId: img.image_id })),
     ...inspectionPhotos.map((p) => ({ url: p.photo_url, label: "Inspector's Photo" })),
     ...resolvedImages.map((img) => ({ url: img.image_url, label: 'After Repair' })),
   ]
+
+  // Which photo the detection was run on (the report's first photo, unless it has been replaced).
+  const detectedIndex = Math.max(0, images.findIndex((img) => img.image_id === detection?.image_id))
+  const detectedImage = images[detectedIndex]
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-8">
@@ -1056,7 +1066,21 @@ export default function ReportDetail() {
                   </span>
                 </div>
                 <p className="text-sm text-gray-600">{detection.detection_notes}</p>
-                <p className="text-xs text-gray-400">Analyzed {formatDate(detection.detected_at)}</p>
+                <DetectionPreview
+                  detection={detection}
+                  imageUrl={detectedImage?.image_url}
+                  showWeak={showWeakBoxes}
+                  onShowWeakChange={setShowWeakBoxes}
+                  onOpen={() => setLightboxIndex(detectedIndex)}
+                />
+                <p className="text-xs text-gray-400">
+                  Analyzed {formatDate(detection.detected_at)} ·{' '}
+                  {detection.detection_source === 'yolov8_local' ? (
+                    <span className="font-medium text-[#0F4C81]">Trained YOLOv8 model</span>
+                  ) : (
+                    <span>Gemini AI (fallback)</span>
+                  )}
+                </p>
               </div>
             ) : (
               <p className="mt-2 text-sm text-gray-400">
@@ -1239,6 +1263,14 @@ export default function ReportDetail() {
           index={lightboxIndex}
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
+          renderOverlay={(image) =>
+            image.imageId && image.imageId === detection?.image_id && detection?.detections?.length ? (
+              <DetectionBoxes
+                detections={detection.detections}
+                showWeak={effectiveShowWeak(detection.detections, showWeakBoxes)}
+              />
+            ) : null
+          }
         />
       )}
     </div>
