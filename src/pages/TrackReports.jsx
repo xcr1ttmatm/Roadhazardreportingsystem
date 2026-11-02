@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { MapPin, Calendar, ChevronDown, Trash2 } from 'lucide-react'
 import { getDisplayPosition, hasVerifiedLocation } from '../lib/reportLocation'
 import { deleteHazardReport } from '../lib/deleteReport'
+import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
+import ImageLightbox from '../components/ImageLightbox'
 import toast from 'react-hot-toast'
 
 const STATUS_STYLES = {
@@ -24,6 +26,32 @@ const STATUS_LABELS = {
   resolved: 'Resolved',
 }
 
+// Severity is set by the LGU's detection step, so it is empty until a report has been assessed.
+const SEVERITY_PILL = {
+  severe: 'bg-red-100 text-[#CE1126]',
+  moderate: 'bg-yellow-100 text-yellow-800',
+  low: 'bg-blue-100 text-[#0F4C81]',
+}
+
+function SeverityPill({ severity }) {
+  const key = typeof severity === 'string' ? severity.trim().toLowerCase() : ''
+  if (!key) return null
+  const label = SEVERITY_LABELS[key] ?? key.charAt(0).toUpperCase() + key.slice(1)
+  return (
+    <span
+      title={`Severity: ${label}`}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${SEVERITY_PILL[key] ?? 'bg-gray-100 text-gray-600'}`}
+    >
+      <span
+        className="h-1.5 w-1.5 rounded-full"
+        style={{ backgroundColor: SEVERITY_COLORS[key] ?? SEVERITY_COLORS.default }}
+      />
+      <span className="sr-only">Severity: </span>
+      {label}
+    </span>
+  )
+}
+
 function formatDate(dateString) {
   return new Date(dateString).toLocaleDateString('en-PH', {
     year: 'numeric',
@@ -39,6 +67,7 @@ export default function TrackReports() {
   const [expandedId, setExpandedId] = useState(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [deleting, setDeleting] = useState(false)
+  const [lightbox, setLightbox] = useState(null) // { images, index } while a photo is open
 
   useEffect(() => {
     if (!user) return
@@ -46,7 +75,7 @@ export default function TrackReports() {
     async function fetchReports() {
       const { data, error } = await supabase
         .from('hazard_reports')
-        .select('*, hazard_images(image_url)')
+        .select('*, hazard_images(image_id, image_url)')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
 
@@ -87,7 +116,8 @@ export default function TrackReports() {
         <div className="mt-6 space-y-3">
           {reports.map((report) => {
             const isExpanded = expandedId === report.report_id
-            const thumbnail = report.hazard_images?.[0]?.image_url
+            const photos = report.hazard_images ?? []
+            const thumbnail = photos[0]?.image_url
 
             return (
               <div
@@ -114,11 +144,14 @@ export default function TrackReports() {
                     </div>
                   </div>
 
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[report.status]}`}
-                  >
-                    {STATUS_LABELS[report.status]}
-                  </span>
+                  <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[report.status]}`}
+                    >
+                      {STATUS_LABELS[report.status]}
+                    </span>
+                    <SeverityPill severity={report.severity} />
+                  </div>
 
                   <ChevronDown
                     className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
@@ -128,6 +161,33 @@ export default function TrackReports() {
                 {isExpanded && (
                   <div className="border-t border-gray-100 px-4 py-4">
                     <p className="text-sm text-gray-600">{report.description}</p>
+
+                    {photos.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-xs font-medium text-gray-500">Your photos ({photos.length})</p>
+                        <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
+                          {photos.map((photo, i) => (
+                            <button
+                              key={photo.image_id ?? i}
+                              type="button"
+                              aria-label={`View photo ${i + 1} of ${photos.length}`}
+                              onClick={() =>
+                                setLightbox({
+                                  images: photos.map((p) => ({ url: p.image_url, label: 'Your photo' })),
+                                  index: i,
+                                })
+                              }
+                            >
+                              <img
+                                src={photo.image_url}
+                                alt=""
+                                className="aspect-square w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div className="mt-3 flex items-center gap-1 text-xs text-gray-400">
                       <MapPin className="h-3.5 w-3.5" />
                       {getDisplayPosition(report)[0].toFixed(5)}, {getDisplayPosition(report)[1].toFixed(5)}
@@ -194,6 +254,15 @@ export default function TrackReports() {
             )
           })}
         </div>
+      )}
+
+      {lightbox && (
+        <ImageLightbox
+          images={lightbox.images}
+          index={lightbox.index}
+          onIndexChange={(i) => setLightbox({ ...lightbox, index: i })}
+          onClose={() => setLightbox(null)}
+        />
       )}
     </div>
   )

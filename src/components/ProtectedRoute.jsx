@@ -1,5 +1,6 @@
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
+import { homePathFor } from '../lib/homePath'
 
 /**
  * Wrap any page that requires login.
@@ -22,8 +23,8 @@ export default function ProtectedRoute({ children, allowedRoles }) {
   }
 
   if (allowedRoles && profile && !allowedRoles.includes(profile.user_type)) {
-    // Logged in, but wrong role — send them to their own dashboard instead
-    return <Navigate to={`/${profile.user_type}`} replace />
+    // Logged in, but wrong role — send them to their own Hazard Map instead
+    return <Navigate to={homePathFor(profile.user_type)} replace />
   }
 
   return children

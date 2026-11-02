@@ -1,7 +1,8 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
-import { AuthProvider, useAuth } from './lib/AuthContext'
+import { AuthProvider } from './lib/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
+import HomeRedirect from './components/HomeRedirect'
 
 import Login from './pages/Login'
 import Register from './pages/Register'
@@ -18,14 +19,6 @@ import ManageUsers from './pages/ManageUsers'
 import InspectorLayout from './pages/InspectorLayout'
 import InspectorDashboard from './pages/InspectorDashboard'
 import InspectionDetail from './pages/InspectionDetail'
-
-function HomeRedirect() {
-  const { user, profile, loading } = useAuth()
-
-  if (loading) return null
-  if (!user) return <Navigate to="/login" replace />
-  return <Navigate to={`/${profile?.user_type ?? 'citizen'}`} replace />
-}
 
 export default function App() {
   return (

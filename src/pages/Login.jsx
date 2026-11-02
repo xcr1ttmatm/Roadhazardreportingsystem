@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { ShieldAlert, Mail, Lock, ArrowRight, MapPin, TriangleAlert } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
+import { homePathFor } from '../lib/homePath'
 
 export default function Login() {
-  const { signIn } = useAuth()
+  const { signIn, user, profile, loading } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -32,9 +33,12 @@ export default function Login() {
       .eq('user_id', data.user.id)
       .single()
 
-    navigate(`/${profile?.user_type ?? 'citizen'}`)
+    navigate(homePathFor(profile?.user_type))
     setSubmitting(false)
   }
+
+  // Already logged in? Skip this page and go straight to the Hazard Map.
+  if (!loading && user && profile) return <Navigate to={homePathFor(profile.user_type)} replace />
 
   return (
     <div className="flex min-h-screen w-full flex-col bg-white lg:flex-row">
