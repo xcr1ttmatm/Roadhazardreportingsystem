@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import { useState, useEffect, useRef } from 'react'
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { Calendar } from 'lucide-react'
+import { Calendar, LocateFixed } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
+import { CITY_CENTER, CITY_BOUNDS, CITY_ZOOM_OUT, CITY_MIN_ZOOM, USER_FOCUS_ZOOM } from '../lib/mapConfig'
+import { useUserLocation } from '../lib/useUserLocation'
+import { countNearbyHazards } from '../lib/geo'
 import { SEVERITY_COLORS } from '../lib/severity'
 import { getDisplayPosition } from '../lib/reportLocation'
 import ImageLightbox from '../components/ImageLightbox'
@@ -97,6 +99,61 @@ function severityIcon(severity, status) {
   })
 }
 
+// The blue "you are here" dot (pulses so it is not mistaken for a hazard marker).
+const USER_ICON = L.divIcon({
+  className: '',
+  html: '<span class="relative flex h-5 w-5"><span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-sky-400 opacity-60"></span><span class="relative inline-flex h-5 w-5 rounded-full border-2 border-white bg-sky-500 shadow"></span></span>',
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+})
+const MAX_ACCURACY_CIRCLE_M = 2000 // a rough, phone-tower-style fix can claim kilometres; do not paint them all
+
+/** Draws the user's position and flies to it whenever centerRequest goes up. Must be inside MapContainer. */
+function UserLocationLayer({ position, centerRequest }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (centerRequest > 0 && position) map.flyTo([position.lat, position.lng], USER_FOCUS_ZOOM)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [centerRequest])
+
+  if (!position) return null
+  const center = [position.lat, position.lng]
+  return (
+    <>
+      {position.accuracy > 0 && (
+        <Circle
+          center={center}
+          radius={Math.min(position.accuracy, MAX_ACCURACY_CIRCLE_M)}
+          pathOptions={{ color: '#0ea5e9', weight: 1, fillColor: '#0ea5e9', fillOpacity: 0.12 }}
+        />
+      )}
+      <Marker position={center} icon={USER_ICON} zIndexOffset={1000}>
+        <Popup>You are here</Popup>
+      </Marker>
+    </>
+  )
+}
+
+function locationMessage(status, nearbyCount) {
+  switch (status) {
+    case 'on':
+      return nearbyCount === 0
+        ? 'Your location is on. No active hazards within 1 km of you.'
+        : `Your location is on. ${nearbyCount} active hazard${nearbyCount === 1 ? '' : 's'} within 1 km of you.`
+    case 'outside':
+      return 'You appear to be outside Iligan City, so your position is not shown on this map.'
+    case 'denied':
+      return 'Location is off, so you are seeing the whole city. Allow location for this site in your browser settings, then press the locate button.'
+    case 'unavailable':
+      return 'We could not find your location yet, so you are seeing the whole city. Press the locate button to try again.'
+    case 'unsupported':
+      return 'This browser cannot share your location, so you are seeing the whole city.'
+    default:
+      return 'Finding your location...'
+  }
+}
+
 function formatDate(dateString) {
   if (!dateString) return null
   return new Date(dateString).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
@@ -106,6 +163,30 @@ export default function HazardMap() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState(null) // { images, index } | null
+
+  const { status: locStatus, position: userPos, retry: retryLocation } = useUserLocation({ bounds: CITY_BOUNDS })
+  const [centerRequest, setCenterRequest] = useState(0) // each increase flies the map to the user
+  const autoCentered = useRef(false)
+
+  // Fly to the user once, on the first fix only, so later updates never fight the user's panning.
+  useEffect(() => {
+    if (userPos && !autoCentered.current) {
+      autoCentered.current = true
+      setCenterRequest((c) => c + 1)
+    }
+  }, [userPos])
+
+  function handleLocateClick() {
+    if (userPos) {
+      setCenterRequest((c) => c + 1) // recentre on the user
+    } else {
+      autoCentered.current = false // fly there when a position finally arrives
+      retryLocation()
+    }
+  }
+
+  const activeCount = reports.filter((r) => r.status === 'approved').length // repaired ones are no longer active
+  const nearbyCount = countNearbyHazards(userPos, reports)
 
   useEffect(() => {
     async function fetchApprovedReports() {
@@ -126,13 +207,17 @@ export default function HazardMap() {
       <h1 className="text-2xl font-bold text-[#0F4C81]">Hazard Map</h1>
       <p className="mt-1 text-sm text-gray-500">
         LGU-verified road hazards across Iligan City.
-        {!loading && ` ${reports.length} active hazard${reports.length === 1 ? '' : 's'}.`}
+        {!loading && ` ${activeCount} active hazard${activeCount === 1 ? '' : 's'}.`}
+      </p>
+      <p data-testid="location-status" className="mt-1 flex items-start gap-1.5 text-sm text-gray-500">
+        <LocateFixed className={`mt-0.5 h-4 w-4 shrink-0 ${locStatus === 'on' ? 'text-sky-500' : 'text-gray-400'}`} />
+        <span>{locationMessage(locStatus, nearbyCount)}</span>
       </p>
 
       <div className="relative mt-6 h-[75vh] min-h-[420px] overflow-hidden rounded-2xl border border-gray-200 shadow-sm">
         <MapContainer
           center={CITY_CENTER}
-          zoom={CITY_DEFAULT_ZOOM}
+          zoom={CITY_ZOOM_OUT}
           minZoom={CITY_MIN_ZOOM}
           maxBounds={CITY_BOUNDS}
           maxBoundsViscosity={1.0}
@@ -142,6 +227,8 @@ export default function HazardMap() {
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
+
+          <UserLocationLayer position={userPos} centerRequest={centerRequest} />
 
           {reports.map((report) => (
             <Marker
@@ -192,6 +279,17 @@ export default function HazardMap() {
             </Marker>
           ))}
         </MapContainer>
+
+        {/* Locate me */}
+        <button
+          type="button"
+          onClick={handleLocateClick}
+          aria-label="Show my location"
+          title="Show my location"
+          className="absolute right-3 top-3 z-[400] flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-[#0F4C81] shadow-md transition hover:bg-gray-50"
+        >
+          <LocateFixed className="h-5 w-5" />
+        </button>
 
         {/* Legend */}
         <div className="absolute bottom-4 left-4 z-[400] rounded-xl border border-gray-200 bg-white/95 px-4 py-3 shadow-md backdrop-blur">

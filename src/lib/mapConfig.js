@@ -14,3 +14,8 @@ export const CITY_BOUNDS = [
 
 export const CITY_DEFAULT_ZOOM = 13
 export const CITY_MIN_ZOOM = 12
+
+// Hazard Map: the widest view the map allows, used when the user's location is off or unavailable.
+export const CITY_ZOOM_OUT = CITY_MIN_ZOOM
+// Hazard Map: how close to zoom in on the user once their location is known (about a few city blocks).
+export const USER_FOCUS_ZOOM = 15
