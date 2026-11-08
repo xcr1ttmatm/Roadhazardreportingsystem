@@ -1,16 +1,24 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet'
+import { MapContainer, Marker, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, MapPin, Scan, Sparkles, Download, ImagePlus, X, Send, CheckCircle2, Pencil, XCircle,
+  ArrowLeft, Calendar, User, MapPin, Scan, Sparkles, Download, ImagePlus, X, Send, CheckCircle2, Pencil, XCircle, ClipboardCheck,
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
 import ImageLightbox from '../components/ImageLightbox'
+import Card from '../components/ui/Card'
+import Button from '../components/ui/Button'
+import { Badge, StatusBadge } from '../components/ui/Badge'
+import { Textarea } from '../components/ui/Field'
+import LoadingState from '../components/ui/LoadingState'
+import EmptyState from '../components/ui/EmptyState'
+import BaseTiles from '../components/map/BaseTiles'
+import { cn } from '../components/ui/utils'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
 import markerShadow from 'leaflet/dist/images/marker-shadow.png'
@@ -21,17 +29,6 @@ L.Marker.prototype.options.icon = L.icon({
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
 })
-
-const STATUS_STYLES = {
-  pending: 'bg-gray-100 text-gray-600',
-  under_review: 'bg-blue-100 text-blue-700',
-  verified: 'bg-purple-100 text-purple-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-[#CE1126]',
-}
-const STATUS_LABELS = {
-  pending: 'Pending', under_review: 'Under Review', verified: 'Verified', approved: 'Approved', rejected: 'Rejected',
-}
 
 function formatDate(dateString) {
   if (!dateString) return '—'
@@ -308,13 +305,27 @@ export default function InspectionDetail() {
     }
   }
 
-  if (loading) return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Loading...</p>
-  if (!report) return <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">Report not found.</p>
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="skeleton h-4 w-40" />
+        <div className="skeleton h-9 w-2/3" />
+        <LoadingState rows={3} label="Loading assignment…" />
+      </div>
+    )
+  }
+  if (!report) {
+    return (
+      <EmptyState icon={ClipboardCheck} title="Report not found" description="This hazard report may have been deleted." />
+    )
+  }
   if (!assignment) {
     return (
-      <p className="mx-auto max-w-4xl px-4 py-8 text-sm text-gray-400">
-        This report isn't assigned to you.
-      </p>
+      <EmptyState
+        icon={ClipboardCheck}
+        title="Not assigned to you"
+        description="This report isn't assigned to you."
+      />
     )
   }
 
@@ -325,245 +336,251 @@ export default function InspectionDetail() {
     ...photos.map((p) => ({ url: p.photo_url, label: 'Your Site Photo' })),
   ]
 
+  const sectionTitle = 'flex items-center gap-1.5 text-sm font-semibold text-ink'
+
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8">
-      <Link to="/inspector" className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#0F4C81]">
+    <div className="space-y-6">
+      <Link
+        to="/inspector"
+        className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-soft transition hover:text-primary"
+      >
         <ArrowLeft className="h-4 w-4" />
         Back to Assignments
       </Link>
 
-      <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0F4C81]">{report.title || 'Untitled hazard report'}</h1>
-          <div className="mt-1 flex items-center gap-1 text-xs text-gray-400">
-            <Calendar className="h-3.5 w-3.5" />
-            Submitted {formatDate(report.created_at)}
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <StatusBadge status={report.status} />
+            <span className="flex items-center gap-1 text-xs text-ink-muted">
+              <Calendar className="h-3.5 w-3.5" />
+              Submitted {formatDate(report.created_at)}
+            </span>
           </div>
+          <h1 className="text-2xl font-bold tracking-tight text-ink sm:text-[28px]">
+            {report.title || 'Untitled hazard report'}
+          </h1>
         </div>
         <div className="flex items-center gap-2">
           {report.ai_report && (
-            <button
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={Download}
               onClick={handleDownloadPdf}
               disabled={downloadingPdf}
-              className="flex items-center gap-1.5 rounded-lg border border-[#0F4C81]/20 bg-white px-3 py-1.5 text-xs font-semibold text-[#0F4C81] transition hover:bg-[#0F4C81]/5 disabled:opacity-60"
             >
-              <Download className="h-3.5 w-3.5" />
-              {downloadingPdf ? 'Preparing...' : 'Download PDF'}
-            </button>
+              {downloadingPdf ? 'Preparing…' : 'Download PDF'}
+            </Button>
           )}
-          <span className={`rounded-full px-3 py-1.5 text-sm font-medium ${STATUS_STYLES[report.status]}`}>
-            {STATUS_LABELS[report.status]}
-          </span>
         </div>
       </div>
 
       {/* Assignment status / accept */}
-      <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-5">
-        {assignment.assignment_status === 'pending' ? (
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-gray-600">You've been assigned to inspect this hazard on-site.</p>
-            <button
-              onClick={handleAccept}
-              disabled={accepting}
-              className="flex items-center gap-1.5 rounded-lg bg-[#0F4C81] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              {accepting ? 'Accepting...' : 'Accept Assignment'}
-            </button>
-          </div>
-        ) : assignment.assignment_status === 'completed' ? (
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-sm font-semibold text-green-700">
-                <CheckCircle2 className="h-4 w-4" />
-                Inspection completed {formatDate(assignment.completed_at)}
-              </p>
-              {!editingFindings && (
-                <button
-                  onClick={() => {
-                    setFindings(assignment.remarks || '')
-                    setDecision(assignment.inspector_decision || null)
-                    setEditingFindings(true)
-                  }}
-                  className="flex items-center gap-1 text-xs font-medium text-[#0F4C81] hover:underline"
+      <Card className="overflow-hidden">
+        <div className="border-b border-line-soft bg-gradient-to-r from-primary-light/40 via-white to-secondary-light/30 px-5 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-primary">Field Assignment</p>
+        </div>
+        <div className="p-5">
+          {assignment.assignment_status === 'pending' ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-ink-soft">You've been assigned to inspect this hazard on-site.</p>
+              <Button variant="gradient" size="sm" icon={CheckCircle2} onClick={handleAccept} disabled={accepting}>
+                {accepting ? 'Accepting…' : 'Accept Assignment'}
+              </Button>
+            </div>
+          ) : assignment.assignment_status === 'completed' ? (
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-sm font-semibold text-success">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Inspection completed {formatDate(assignment.completed_at)}
+                </p>
+                {!editingFindings && (
+                  <button
+                    onClick={() => {
+                      setFindings(assignment.remarks || '')
+                      setDecision(assignment.inspector_decision || null)
+                      setEditingFindings(true)
+                    }}
+                    className="flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    Edit Findings
+                  </button>
+                )}
+              </div>
+
+              {!editingFindings && assignment.inspector_decision && (
+                <Badge
+                  tone={assignment.inspector_decision === 'approve' ? 'success' : 'danger'}
+                  className="mt-2"
                 >
-                  <Pencil className="h-3 w-3" />
-                  Edit Findings
-                </button>
+                  {assignment.inspector_decision === 'approve' ? (
+                    <CheckCircle2 className="h-3 w-3" />
+                  ) : (
+                    <XCircle className="h-3 w-3" />
+                  )}
+                  You recommended: {assignment.inspector_decision === 'approve' ? 'Approve' : 'Reject'}
+                </Badge>
+              )}
+
+              {editingFindings ? (
+                <div className="mt-2 space-y-2">
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => setDecision('approve')}
+                      className={cn(
+                        'flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm font-semibold transition',
+                        decision === 'approve'
+                          ? 'border-success bg-success-light/60 text-success'
+                          : 'border-line text-ink-soft hover:border-success/30'
+                      )}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      Recommend Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDecision('reject')}
+                      className={cn(
+                        'flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm font-semibold transition',
+                        decision === 'reject'
+                          ? 'border-danger bg-danger-light/60 text-danger'
+                          : 'border-line text-ink-soft hover:border-danger/30'
+                      )}
+                    >
+                      <XCircle className="h-4 w-4" />
+                      Recommend Reject
+                    </button>
+                  </div>
+                  <Textarea
+                    rows={4}
+                    value={findings}
+                    onChange={(e) => setFindings(e.target.value)}
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="primary" size="xs" onClick={handleUpdateFindings} disabled={updatingFindings}>
+                      {updatingFindings ? 'Saving…' : 'Save Changes'}
+                    </Button>
+                    <Button variant="secondary" size="xs" onClick={() => setEditingFindings(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm leading-relaxed text-ink-soft">{assignment.remarks}</p>
               )}
             </div>
+          ) : (
+            <p className="text-sm font-medium text-info">Assignment accepted — conduct your site inspection below.</p>
+          )}
+        </div>
+      </Card>
 
-            {!editingFindings && assignment.inspector_decision && (
-              <span
-                className={`mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-                  assignment.inspector_decision === 'approve'
-                    ? 'bg-green-100 text-green-700'
-                    : 'bg-red-100 text-[#CE1126]'
-                }`}
-              >
-                {assignment.inspector_decision === 'approve' ? (
-                  <CheckCircle2 className="h-3 w-3" />
-                ) : (
-                  <XCircle className="h-3 w-3" />
-                )}
-                You recommended: {assignment.inspector_decision === 'approve' ? 'Approve' : 'Reject'}
-              </span>
-            )}
-
-            {editingFindings ? (
-              <div className="mt-2 space-y-2">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setDecision('approve')}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
-                      decision === 'approve'
-                        ? 'border-green-600 bg-green-50 text-green-700'
-                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                    }`}
-                  >
-                    <CheckCircle2 className="h-4 w-4" />
-                    Recommend Approve
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDecision('reject')}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
-                      decision === 'reject'
-                        ? 'border-[#CE1126] bg-red-50 text-[#CE1126]'
-                        : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                    }`}
-                  >
-                    <XCircle className="h-4 w-4" />
-                    Recommend Reject
-                  </button>
-                </div>
-                <textarea
-                  rows={4}
-                  value={findings}
-                  onChange={(e) => setFindings(e.target.value)}
-                  className="w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleUpdateFindings}
-                    disabled={updatingFindings}
-                    className="rounded-lg bg-[#0F4C81] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
-                  >
-                    {updatingFindings ? 'Saving...' : 'Save Changes'}
-                  </button>
-                  <button
-                    onClick={() => setEditingFindings(false)}
-                    className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-gray-600">{assignment.remarks}</p>
-            )}
-          </div>
-        ) : (
-          <p className="text-sm text-blue-700">Assignment accepted — conduct your site inspection below.</p>
-        )}
-      </div>
-
-      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Left: citizen's photo + description + reporter */}
-        <div className="space-y-4">
+        <div className="space-y-5">
           {images.length > 0 && (
-            <div className="rounded-2xl border border-gray-200 bg-white p-5">
-              <h2 className="mb-3 text-sm font-semibold text-[#0F4C81]">
+            <Card className="p-5">
+              <h2 className={cn(sectionTitle, 'mb-3')}>
                 Citizen's Photos ({images.length})
               </h2>
-              <button type="button" onClick={() => setLightboxIndex(0)} className="block w-full">
+              <button
+                type="button"
+                onClick={() => setLightboxIndex(0)}
+                className="block w-full overflow-hidden rounded-xl ring-1 ring-line"
+              >
                 <img
                   src={images[0].image_url}
                   alt=""
-                  className="h-56 w-full cursor-zoom-in rounded-xl object-cover transition hover:opacity-90"
+                  className="max-h-72 w-full cursor-zoom-in bg-canvas object-contain transition hover:opacity-90"
                 />
               </button>
               {images.length > 1 && (
                 <div className="mt-2 grid grid-cols-4 gap-2">
                   {images.slice(1).map((img, i) => (
-                    <button key={img.image_id} type="button" onClick={() => setLightboxIndex(i + 1)}>
+                    <button
+                      key={img.image_id}
+                      type="button"
+                      onClick={() => setLightboxIndex(i + 1)}
+                      className="block overflow-hidden rounded-lg ring-1 ring-line"
+                    >
                       <img
                         src={img.image_url}
                         alt=""
-                        className="h-16 w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                        className="h-16 w-full cursor-zoom-in object-cover transition hover:opacity-80"
                       />
                     </button>
                   ))}
                 </div>
               )}
-            </div>
+            </Card>
           )}
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <h2 className="text-sm font-semibold text-[#0F4C81]">Citizen's Description</h2>
-            <p className="mt-2 text-sm text-gray-600">{report.description}</p>
-          </div>
+          <Card className="p-5">
+            <h2 className={sectionTitle}>Citizen's Description</h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-soft">{report.description}</p>
+          </Card>
 
-          <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <h2 className="text-sm font-semibold text-[#0F4C81]">Reported By</h2>
-            <div className="mt-2 space-y-1.5">
-              <p className="flex items-center gap-2 text-sm text-gray-600">
-                <User className="h-3.5 w-3.5 text-gray-400" />
+          <Card className="p-5">
+            <h2 className={sectionTitle}>Reported By</h2>
+            <div className="mt-3 space-y-2">
+              <p className="flex items-center gap-2 text-sm text-ink-soft">
+                <User className="h-3.5 w-3.5 text-ink-muted" />
                 {report.reporter?.username ?? 'Unknown'}
               </p>
-              <p className="flex items-center gap-2 text-sm text-gray-600">
-                <MapPin className="h-3.5 w-3.5 text-gray-400" />
+              <p className="flex items-center gap-2 text-sm text-ink-soft">
+                <MapPin className="h-3.5 w-3.5 text-ink-muted" />
                 {report.reporter?.address || 'Not provided'}
               </p>
             </div>
-          </div>
+          </Card>
 
           {detection && (
-            <div className="rounded-2xl border border-gray-200 bg-white p-5">
-              <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#0F4C81]">
-                <Scan className="h-4 w-4" />
+            <Card className="p-5">
+              <h2 className={sectionTitle}>
+                <Scan className="h-4 w-4 text-primary" />
                 Computer Vision Detection
               </h2>
-              <div className="mt-2 flex items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <span
-                  className="rounded-full px-2.5 py-1 text-xs font-medium text-white"
+                  className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
                   style={{ backgroundColor: SEVERITY_COLORS[detection.severity_level?.toLowerCase()] || SEVERITY_COLORS.default }}
                 >
                   {SEVERITY_LABELS[detection.severity_level?.toLowerCase()] || detection.severity_level}
                 </span>
-                <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
-                  {formatHazardType(detection.hazard_type)}
-                </span>
+                <Badge tone="neutral">{formatHazardType(detection.hazard_type)}</Badge>
               </div>
-              <p className="mt-2 text-sm text-gray-600">{detection.detection_notes}</p>
-            </div>
+              <p className="mt-2 text-sm leading-relaxed text-ink-soft">{detection.detection_notes}</p>
+            </Card>
           )}
 
           {report.ai_report && (
-            <div className="rounded-2xl border border-gray-200 bg-white p-5">
-              <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[#0F4C81]">
-                <Sparkles className="h-4 w-4" />
+            <Card className="p-5">
+              <h2 className={sectionTitle}>
+                <Sparkles className="h-4 w-4 text-secondary" />
                 AI-Assisted Report
               </h2>
               <div className="mt-3 space-y-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Executive Summary</p>
-                  <p className="mt-1 text-sm text-gray-600">{report.ai_report.executive_summary}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">Executive Summary</p>
+                  <p className="mt-1 text-sm leading-relaxed text-ink-soft">{report.ai_report.executive_summary}</p>
                 </div>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Recommended Action</p>
-                  <p className="mt-1 text-sm text-gray-600">{report.ai_report.recommended_action}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">Recommended Action</p>
+                  <p className="mt-1 text-sm leading-relaxed text-ink-soft">{report.ai_report.recommended_action}</p>
                 </div>
               </div>
-            </div>
+            </Card>
           )}
         </div>
 
         {/* Right: map + site inspection work */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-gray-500">
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-medium text-ink-soft">
               {correctingLocation ? 'Tap the map to pin the correct location' : 'Reported location'}
             </p>
             {assignment.assignment_status === 'accepted' && !correctingLocation && (
@@ -571,13 +588,13 @@ export default function InspectionDetail() {
                 <button
                   onClick={handleConfirmLocation}
                   disabled={savingLocation}
-                  className="text-xs font-medium text-green-700 hover:underline disabled:opacity-60"
+                  className="text-xs font-semibold text-success hover:underline disabled:opacity-60"
                 >
                   Confirm Accurate
                 </button>
                 <button
                   onClick={() => setCorrectingLocation(true)}
-                  className="text-xs font-medium text-[#0F4C81] hover:underline"
+                  className="text-xs font-semibold text-primary hover:underline"
                 >
                   Correct Location
                 </button>
@@ -586,73 +603,75 @@ export default function InspectionDetail() {
             {correctingLocation && (
               <button
                 onClick={() => setCorrectingLocation(false)}
-                className="text-xs font-medium text-gray-500 hover:underline"
+                className="text-xs font-semibold text-ink-soft hover:underline"
               >
                 Cancel
               </button>
             )}
           </div>
 
-          <div className="h-56 overflow-hidden rounded-2xl border border-gray-200">
-            <MapContainer
-              center={correctedPosition || position}
-              zoom={16}
-              className="leaflet-container"
-              zoomControl={false}
-            >
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {correctingLocation ? (
-                <CorrectionMarker position={correctedPosition} setPosition={setCorrectedPosition} />
-              ) : (
-                <Marker position={correctedPosition ? [correctedPosition.lat, correctedPosition.lng] : position} />
-              )}
-            </MapContainer>
-          </div>
+          <Card className="overflow-hidden">
+            <div className="h-56">
+              <MapContainer
+                center={correctedPosition || position}
+                zoom={16}
+                className="leaflet-container"
+                zoomControl={false}
+              >
+                <BaseTiles />
+                {correctingLocation ? (
+                  <CorrectionMarker position={correctedPosition} setPosition={setCorrectedPosition} />
+                ) : (
+                  <Marker position={correctedPosition ? [correctedPosition.lat, correctedPosition.lng] : position} />
+                )}
+              </MapContainer>
+            </div>
+          </Card>
 
           {correctingLocation ? (
-            <button
-              onClick={handleSaveCorrectedLocation}
-              disabled={savingLocation}
-              className="rounded-lg bg-[#0F4C81] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
-            >
-              {savingLocation ? 'Saving...' : 'Save Corrected Location'}
-            </button>
+            <Button variant="gradient" size="sm" onClick={handleSaveCorrectedLocation} disabled={savingLocation}>
+              {savingLocation ? 'Saving…' : 'Save Corrected Location'}
+            </Button>
           ) : (
-            <p className="flex items-center gap-1 text-xs text-gray-400">
-              <MapPin className="h-3.5 w-3.5" />
-              {correctedPosition ? (
-                <>
-                  {correctedPosition.lat.toFixed(5)}, {correctedPosition.lng.toFixed(5)}{' '}
-                  <span className="text-green-700">
-                    {Number(correctedPosition.lat).toFixed(5) === Number(report.latitude).toFixed(5) &&
-                    Number(correctedPosition.lng).toFixed(5) === Number(report.longitude).toFixed(5)
-                      ? '(confirmed accurate by you)'
-                      : '(corrected by you)'}
-                  </span>
-                </>
-              ) : (
-                `${position[0].toFixed(5)}, ${position[1].toFixed(5)} (not yet confirmed)`
-              )}
+            <p className="flex items-start gap-1.5 text-xs text-ink-soft">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+              <span>
+                {correctedPosition ? (
+                  <>
+                    {correctedPosition.lat.toFixed(5)}, {correctedPosition.lng.toFixed(5)}{' '}
+                    <span className="font-medium text-success">
+                      {Number(correctedPosition.lat).toFixed(5) === Number(report.latitude).toFixed(5) &&
+                      Number(correctedPosition.lng).toFixed(5) === Number(report.longitude).toFixed(5)
+                        ? '(confirmed accurate by you)'
+                        : '(corrected by you)'}
+                    </span>
+                  </>
+                ) : (
+                  `${position[0].toFixed(5)}, ${position[1].toFixed(5)} (not yet confirmed)`
+                )}
+              </span>
             </p>
           )}
 
           {assignment.assignment_status !== 'pending' && (
             <>
               {/* Upload inspection photos */}
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <h2 className="text-sm font-semibold text-[#0F4C81]">Site Inspection Photos</h2>
+              <Card className="p-5">
+                <h2 className={sectionTitle}>Site Inspection Photos</h2>
 
                 {photos.length > 0 && (
                   <div className="mt-3 grid grid-cols-3 gap-2">
                     {photos.map((p, i) => (
-                      <button key={p.inspection_photo_id} type="button" onClick={() => setLightboxIndex(images.length + i)}>
+                      <button
+                        key={p.inspection_photo_id}
+                        type="button"
+                        onClick={() => setLightboxIndex(images.length + i)}
+                        className="block overflow-hidden rounded-lg ring-1 ring-line"
+                      >
                         <img
                           src={p.photo_url}
                           alt=""
-                          className="aspect-square w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-80"
+                          className="aspect-square w-full cursor-zoom-in object-cover transition hover:opacity-80"
                         />
                       </button>
                     ))}
@@ -664,12 +683,13 @@ export default function InspectionDetail() {
                     {newPhotoPreviews.length > 0 && (
                       <div className="mt-3 grid grid-cols-3 gap-2">
                         {newPhotoPreviews.map((src, i) => (
-                          <div key={src} className="group relative aspect-square overflow-hidden rounded-lg">
+                          <div key={src} className="group relative aspect-square overflow-hidden rounded-xl ring-1 ring-line">
                             <img src={src} alt="" className="h-full w-full object-cover" />
                             <button
                               type="button"
                               onClick={() => removeNewPhoto(i)}
-                              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition group-hover:opacity-100"
+                              aria-label="Remove photo"
+                              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-ink/60 text-white opacity-0 transition group-hover:opacity-100"
                             >
                               <X className="h-3 w-3" />
                             </button>
@@ -682,7 +702,7 @@ export default function InspectionDetail() {
                       {newPhotoFiles.length < MAX_PHOTOS && (
                         <label
                           htmlFor="inspection-photo-input"
-                          className="flex cursor-pointer items-center gap-1.5 rounded-lg border-2 border-dashed border-gray-300 px-3 py-2 text-xs text-gray-500 transition hover:border-[#0F4C81] hover:bg-[#0F4C81]/5"
+                          className="flex cursor-pointer items-center gap-1.5 rounded-xl border-2 border-dashed border-line px-3 py-2 text-xs font-medium text-ink-soft transition hover:border-primary/40 hover:bg-primary-light/30"
                         >
                           <ImagePlus className="h-3.5 w-3.5" />
                           Add photos
@@ -697,37 +717,36 @@ export default function InspectionDetail() {
                         className="hidden"
                       />
                       {newPhotoFiles.length > 0 && (
-                        <button
-                          onClick={handleUploadPhotos}
-                          disabled={uploading}
-                          className="rounded-lg bg-[#0F4C81] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
-                        >
-                          {uploading ? 'Uploading...' : `Upload ${newPhotoFiles.length} photo${newPhotoFiles.length === 1 ? '' : 's'}`}
-                        </button>
+                        <Button variant="primary" size="xs" onClick={handleUploadPhotos} disabled={uploading}>
+                          {uploading
+                            ? 'Uploading…'
+                            : `Upload ${newPhotoFiles.length} photo${newPhotoFiles.length === 1 ? '' : 's'}`}
+                        </Button>
                       )}
                     </div>
                   </>
                 )}
-              </div>
+              </Card>
 
               {/* Submit findings */}
               {assignment.assignment_status !== 'completed' && (
-                <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                  <h2 className="text-sm font-semibold text-[#0F4C81]">Verification Findings</h2>
-                  <p className="mt-1 text-xs text-gray-400">
+                <Card className="p-5">
+                  <h2 className={sectionTitle}>Verification Findings</h2>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-muted">
                     Your recommendation and remarks — the admin makes the final call on whether this goes on the
                     Hazard Map.
                   </p>
 
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                     <button
                       type="button"
                       onClick={() => setDecision('approve')}
-                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
+                      className={cn(
+                        'flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm font-semibold transition',
                         decision === 'approve'
-                          ? 'border-green-600 bg-green-50 text-green-700'
-                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                      }`}
+                          ? 'border-success bg-success-light/60 text-success'
+                          : 'border-line text-ink-soft hover:border-success/30'
+                      )}
                     >
                       <CheckCircle2 className="h-4 w-4" />
                       Recommend Approve
@@ -735,18 +754,19 @@ export default function InspectionDetail() {
                     <button
                       type="button"
                       onClick={() => setDecision('reject')}
-                      className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border-2 px-3 py-2 text-sm font-semibold transition ${
+                      className={cn(
+                        'flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 px-3 py-2 text-sm font-semibold transition',
                         decision === 'reject'
-                          ? 'border-[#CE1126] bg-red-50 text-[#CE1126]'
-                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                      }`}
+                          ? 'border-danger bg-danger-light/60 text-danger'
+                          : 'border-line text-ink-soft hover:border-danger/30'
+                      )}
                     >
                       <XCircle className="h-4 w-4" />
                       Recommend Reject
                     </button>
                   </div>
 
-                  <textarea
+                  <Textarea
                     rows={4}
                     value={findings}
                     onChange={(e) => setFindings(e.target.value)}
@@ -755,17 +775,19 @@ export default function InspectionDetail() {
                         ? 'Explain why — e.g. no road damage found at this location, does not match the photo'
                         : "Describe what you found on-site — does it match the citizen's report? Severity confirmed? Recommended repair?"
                     }
-                    className="mt-3 w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:outline-none"
+                    className="mt-3"
                   />
-                  <button
+                  <Button
+                    variant="gradient"
+                    size="sm"
+                    icon={Send}
+                    className="mt-2"
                     onClick={handleSubmitFindings}
                     disabled={submitting}
-                    className="mt-2 flex items-center gap-1.5 rounded-lg bg-[#0F4C81] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
                   >
-                    <Send className="h-4 w-4" />
-                    {submitting ? 'Submitting...' : 'Submit Verification'}
-                  </button>
-                </div>
+                    {submitting ? 'Submitting…' : 'Submit Verification'}
+                  </Button>
+                </Card>
               )}
             </>
           )}

@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { Bell } from 'lucide-react'
+import { Bell, CheckCheck } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
+import { cn } from './ui/utils'
 
 function timeAgo(dateString) {
   const seconds = Math.floor((new Date() - new Date(dateString)) / 1000)
@@ -56,8 +57,15 @@ export default function NotificationBell() {
     function handleClickOutside(e) {
       if (panelRef.current && !panelRef.current.contains(e.target)) setOpen(false)
     }
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') setOpen(false)
+    }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
   }, [])
 
   async function markAsRead(id) {
@@ -75,23 +83,39 @@ export default function NotificationBell() {
   return (
     <div className="relative" ref={panelRef}>
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
-        className="relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100"
+        aria-label="Notifications"
+        aria-expanded={open}
+        className={cn(
+          'relative flex h-9 w-9 items-center justify-center rounded-xl border border-transparent text-ink-soft transition hover:bg-canvas hover:text-primary',
+          open && 'border-line bg-canvas/70 text-primary'
+        )}
       >
-        <Bell className="h-5 w-5" />
+        <Bell className="h-[18px] w-[18px]" />
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#CE1126] text-[10px] font-bold text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gradient-to-br from-primary to-secondary px-1 text-[9px] font-bold text-white ring-2 ring-white">
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-30 mt-2 w-80 max-w-[90vw] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-xl">
-          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-            <span className="text-sm font-semibold text-[#0F4C81]">Notifications</span>
+        <div className="absolute right-0 z-50 mt-2 w-[340px] max-w-[calc(100vw-2rem)] origin-top-right animate-scale-in overflow-hidden rounded-2xl border border-line bg-white shadow-float max-sm:fixed max-sm:inset-x-4 max-sm:top-[4.5rem] max-sm:mt-0 max-sm:w-auto max-sm:max-w-none max-sm:origin-top">
+          <div className="flex items-center justify-between border-b border-line-soft px-4 py-3">
+            <div>
+              <p className="text-sm font-bold tracking-tight text-ink">Notifications</p>
+              <p className="text-[10px] font-medium text-ink-muted">
+                {unreadCount > 0 ? `${unreadCount} unread` : 'You are all caught up'}
+              </p>
+            </div>
             {unreadCount > 0 && (
-              <button onClick={markAllRead} className="text-xs font-medium text-[#0F4C81] hover:underline">
+              <button
+                type="button"
+                onClick={markAllRead}
+                className="flex items-center gap-1 rounded-lg bg-primary-light/60 px-2 py-1 text-[10px] font-semibold text-primary transition hover:bg-primary-light"
+              >
+                <CheckCheck className="h-3 w-3" />
                 Mark all read
               </button>
             )}
@@ -99,22 +123,30 @@ export default function NotificationBell() {
 
           <div className="max-h-80 overflow-y-auto">
             {notifications.length === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-gray-400">No notifications yet</p>
+              <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-canvas text-ink-muted">
+                  <Bell className="h-5 w-5" />
+                </span>
+                <p className="mt-3 text-xs font-semibold text-ink">No notifications yet</p>
+                <p className="mt-0.5 text-[11px] text-ink-muted">Updates about your reports will appear here.</p>
+              </div>
             ) : (
               notifications.map((n) => (
                 <button
+                  type="button"
                   key={n.notification_id}
                   onClick={() => markAsRead(n.notification_id)}
-                  className={`flex w-full flex-col items-start gap-0.5 border-b border-gray-50 px-4 py-3 text-left transition hover:bg-gray-50 ${
-                    !n.is_read ? 'bg-[#0F4C81]/5' : ''
-                  }`}
+                  className={cn(
+                    'flex w-full flex-col items-start gap-0.5 border-b border-line-soft px-4 py-3 text-left transition last:border-0 hover:bg-canvas/70',
+                    !n.is_read && 'bg-primary-light/25'
+                  )}
                 >
                   <div className="flex w-full items-center gap-2">
-                    {!n.is_read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#CE1126]" />}
-                    <span className="text-sm font-medium text-[#0F4C81]">{n.title}</span>
+                    {!n.is_read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+                    <span className="truncate text-xs font-semibold text-ink">{n.title}</span>
                   </div>
-                  <p className="text-xs text-gray-500">{n.message}</p>
-                  <span className="mt-0.5 text-[11px] text-gray-400">{timeAgo(n.sent_at)}</span>
+                  <p className="line-clamp-2 text-[11px] leading-relaxed text-ink-soft">{n.message}</p>
+                  <span className="mt-0.5 text-[10px] text-ink-muted">{timeAgo(n.sent_at)}</span>
                 </button>
               ))
             )}

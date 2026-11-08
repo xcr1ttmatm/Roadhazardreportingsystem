@@ -8,6 +8,7 @@
 // Every saved result records which engine produced it (detection_source).
 
 import { detectInBrowser, MIN_CONFIDENCE, toStoredDetections } from './localDetector'
+import { friendlyAiError, readFunctionError } from './functionErrors'
 
 /**
  * @param {object} report    the hazard_reports row, with hazard_images joined
@@ -56,8 +57,8 @@ export async function runHazardDetection(report, supabase, { detector = detectIn
       imageUrl: primaryImage.image_url,
     },
   })
-  if (error) throw error
-  if (data?.error) throw new Error(data.error)
+  if (error) throw new Error(friendlyAiError(await readFunctionError(error)))
+  if (data?.error) throw new Error(friendlyAiError(data.error))
 
   // Label the result's origin and keep what the trained model saw (its weaker guesses), so the admin
   // can see why it was not used. Best-effort: if the columns are missing the result still stands,

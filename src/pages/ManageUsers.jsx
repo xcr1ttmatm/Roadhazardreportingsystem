@@ -1,12 +1,21 @@
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
-import { UserPlus, ShieldCheck, HardHat, Mail, Calendar, X } from 'lucide-react'
+import { UserPlus, ShieldCheck, HardHat, Mail, Calendar, Users } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import PageHeader from '../components/ui/PageHeader'
+import Card from '../components/ui/Card'
+import Button from '../components/ui/Button'
+import Modal from '../components/ui/Modal'
+import { Field, Input, Select } from '../components/ui/Field'
+import { RoleBadge } from '../components/ui/Badge'
+import Avatar from '../components/ui/Avatar'
+import SearchInput from '../components/ui/SearchInput'
+import Pagination from '../components/ui/Pagination'
+import DataTable from '../components/ui/DataTable'
+import EmptyState from '../components/ui/EmptyState'
+import LoadingState from '../components/ui/LoadingState'
 
-const ROLE_STYLES = {
-  admin: 'bg-[#0F4C81]/10 text-[#0F4C81]',
-  inspector: 'bg-[#FCD116]/20 text-[#8a6d00]',
-}
+const PAGE_SIZE = 8
 
 function formatDate(dateString) {
   return new Date(dateString).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
@@ -17,6 +26,8 @@ export default function ManageUsers() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
 
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
@@ -45,6 +56,10 @@ export default function ManageUsers() {
     setUserType('inspector')
   }
 
+  function closeForm() {
+    setShowForm(false)
+  }
+
   async function handleCreate(e) {
     e.preventDefault()
     setSubmitting(true)
@@ -69,122 +84,255 @@ export default function ManageUsers() {
     }
   }
 
-  return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-[#0F4C81]">Manage Staff</h1>
-          <p className="mt-1 text-sm text-gray-500">Create and view Inspector and Admin accounts.</p>
+  const adminCount = staff.filter((person) => person.user_type === 'admin').length
+  const inspectorCount = staff.filter((person) => person.user_type === 'inspector').length
+
+  const searchTerm = query.trim().toLowerCase()
+  const searched = searchTerm
+    ? staff.filter((person) =>
+        [person.username, person.email, person.full_name]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(searchTerm)
+      )
+    : staff
+
+  const pageCount = Math.max(1, Math.ceil(searched.length / PAGE_SIZE))
+  const currentPage = Math.min(page, pageCount)
+  const paginated = searched.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+
+  const columns = [
+    {
+      key: 'person',
+      header: 'Staff member',
+      render: (person) => (
+        <div className="flex min-w-0 items-center gap-3">
+          <Avatar name={person.full_name || person.username} size="md" />
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-semibold text-ink">{person.username}</p>
+            <p className="truncate text-[11px] text-ink-muted">{person.full_name || '—'}</p>
+          </div>
         </div>
-        <button
-          onClick={() => setShowForm((s) => !s)}
-          className="flex items-center gap-1.5 rounded-xl bg-[#0F4C81] px-4 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#0F4C81]/20 transition hover:bg-[#0B3A63]"
-        >
-          {showForm ? <X className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
-          {showForm ? 'Cancel' : 'New Staff Account'}
-        </button>
+      ),
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      render: (person) => (
+        <span className="flex items-center gap-1.5 text-xs text-ink-soft">
+          <Mail className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+          <span className="truncate">{person.email}</span>
+        </span>
+      ),
+    },
+    {
+      key: 'role',
+      header: 'Role',
+      render: (person) => <RoleBadge role={person.user_type} />,
+    },
+    {
+      key: 'created',
+      header: 'Added',
+      render: (person) => (
+        <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-ink-soft">
+          <Calendar className="h-3.5 w-3.5 text-ink-muted" />
+          {formatDate(person.created_at)}
+        </span>
+      ),
+    },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Administration"
+        title="Manage Staff"
+        description="Create and view Inspector and Admin accounts."
+        icon={Users}
+        actions={
+          <Button variant="gradient" icon={UserPlus} onClick={() => setShowForm(true)}>
+            New Staff Account
+          </Button>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <Card className="flex items-center gap-3 p-4">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-light text-primary">
+            <Users className="h-[18px] w-[18px]" />
+          </span>
+          <div>
+            <p className="text-[11px] font-semibold text-ink-soft">Total staff</p>
+            <p className="text-xl font-bold leading-none text-ink">{loading ? '—' : staff.length}</p>
+          </div>
+        </Card>
+        <Card className="flex items-center gap-3 p-4">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-secondary-light text-secondary">
+            <ShieldCheck className="h-[18px] w-[18px]" />
+          </span>
+          <div>
+            <p className="text-[11px] font-semibold text-ink-soft">Administrators</p>
+            <p className="text-xl font-bold leading-none text-ink">{loading ? '—' : adminCount}</p>
+          </div>
+        </Card>
+        <Card className="flex items-center gap-3 p-4">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning-light text-warning">
+            <HardHat className="h-[18px] w-[18px]" />
+          </span>
+          <div>
+            <p className="text-[11px] font-semibold text-ink-soft">Inspectors</p>
+            <p className="text-xl font-bold leading-none text-ink">{loading ? '—' : inspectorCount}</p>
+          </div>
+        </Card>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="mt-6 space-y-4 rounded-2xl border border-gray-200 bg-white p-5">
+      <Card className="p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-[15px] font-semibold tracking-tight text-ink">Staff directory</h2>
+            <p className="mt-0.5 text-xs text-ink-soft">Accounts with LGU administrative access.</p>
+          </div>
+          <SearchInput
+            value={query}
+            onChange={(value) => {
+              setQuery(value)
+              setPage(1)
+            }}
+            placeholder="Search staff…"
+            className="w-full sm:max-w-xs"
+          />
+        </div>
+
+        <div className="mt-4">
+          {loading ? (
+            <LoadingState rows={4} label="Loading staff…" />
+          ) : searched.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title={searchTerm ? 'No matching staff' : 'No staff accounts yet besides you'}
+              description={
+                searchTerm
+                  ? 'Try a different search term or clear the search box.'
+                  : 'Create an Inspector or Admin account to get started.'
+              }
+              action={
+                !searchTerm ? (
+                  <Button variant="primary" size="sm" icon={UserPlus} onClick={() => setShowForm(true)}>
+                    New Staff Account
+                  </Button>
+                ) : null
+              }
+            />
+          ) : (
+            <>
+              <DataTable
+                columns={columns}
+                rows={paginated}
+                rowKey="user_id"
+                renderMobile={(person) => (
+                  <div
+                    key={person.user_id}
+                    className="rounded-2xl border border-line bg-white p-3.5 shadow-soft"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar name={person.full_name || person.username} size="md" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold text-ink">{person.username}</p>
+                        <p className="truncate text-[11px] text-ink-muted">{person.full_name || '—'}</p>
+                      </div>
+                      <RoleBadge role={person.user_type} />
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line-soft pt-2.5 text-[11px] text-ink-soft">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <Mail className="h-3 w-3 shrink-0 text-ink-muted" />
+                        <span className="truncate">{person.email}</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <Calendar className="h-3 w-3 text-ink-muted" />
+                        {formatDate(person.created_at)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              />
+
+              <Pagination
+                page={currentPage}
+                pageCount={pageCount}
+                onChange={setPage}
+                total={searched.length}
+                pageSize={PAGE_SIZE}
+                className="mt-4"
+              />
+            </>
+          )}
+        </div>
+      </Card>
+
+      <Modal
+        open={showForm}
+        onClose={closeForm}
+        title="New Staff Account"
+        description="Create an Inspector or Admin account. Share the temporary password securely."
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeForm} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button type="submit" form="create-staff-form" variant="gradient" loading={submitting}>
+              {submitting ? 'Creating…' : 'Create Account'}
+            </Button>
+          </>
+        }
+      >
+        <form id="create-staff-form" onSubmit={handleCreate} className="space-y-4">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Username</label>
-              <input
+            <Field label="Username" htmlFor="staff-username" required>
+              <Input
+                id="staff-username"
                 type="text"
                 required
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
               />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Role</label>
-              <select
-                value={userType}
-                onChange={(e) => setUserType(e.target.value)}
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
-              >
+            </Field>
+
+            <Field label="Role" htmlFor="staff-role" required>
+              <Select id="staff-role" value={userType} onChange={(e) => setUserType(e.target.value)}>
                 <option value="inspector">Inspector</option>
                 <option value="admin">Admin</option>
-              </select>
-            </div>
+              </Select>
+            </Field>
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Email</label>
-            <input
+          <Field label="Email" htmlFor="staff-email" required>
+            <Input
+              id="staff-email"
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Temporary Password</label>
-            <input
+          <Field
+            label="Temporary Password"
+            htmlFor="staff-password"
+            hint="Share this with them securely — they can change it after logging in."
+            required
+          >
+            <Input
+              id="staff-password"
               type="text"
               required
               minLength={6}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Share this with them securely — they can change it after logging in"
-              className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm text-[#0F4C81] focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
             />
-          </div>
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-xl bg-[#0F4C81] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0B3A63] disabled:opacity-60"
-          >
-            {submitting ? 'Creating...' : 'Create Account'}
-          </button>
+          </Field>
         </form>
-      )}
-
-      <div className="mt-6 space-y-3">
-        {loading ? (
-          <p className="text-sm text-gray-400">Loading staff...</p>
-        ) : staff.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 py-12 text-center">
-            <p className="text-sm text-gray-500">No staff accounts yet besides you.</p>
-          </div>
-        ) : (
-          staff.map((person) => (
-            <div
-              key={person.user_id}
-              className="flex items-center gap-4 rounded-2xl border border-gray-200 bg-white px-4 py-4 shadow-sm"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100">
-                {person.user_type === 'admin' ? (
-                  <ShieldCheck className="h-5 w-5 text-[#0F4C81]" />
-                ) : (
-                  <HardHat className="h-5 w-5 text-[#8a6d00]" />
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium text-[#0F4C81]">{person.username}</p>
-                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-400">
-                  <span className="flex items-center gap-1">
-                    <Mail className="h-3 w-3" />
-                    {person.email}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
-                    {formatDate(person.created_at)}
-                  </span>
-                </div>
-              </div>
-              <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium capitalize ${ROLE_STYLES[person.user_type]}`}>
-                {person.user_type}
-              </span>
-            </div>
-          ))
-        )}
-      </div>
+      </Modal>
     </div>
   )
 }

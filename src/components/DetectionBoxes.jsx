@@ -78,7 +78,7 @@ export function DetectionPreview({ detection, imageUrl, showWeak, onShowWeakChan
   return (
     <div className="mt-3">
       <button type="button" onClick={onOpen} aria-label="Open the photo with detection boxes" className="block w-full">
-        <div className="flex justify-center rounded-lg bg-gray-100 p-1">
+        <div className="flex justify-center rounded-xl bg-canvas p-1 ring-1 ring-line">
           <div className="relative inline-block max-w-full">
             <img src={imageUrl} alt="" className="block max-h-56 max-w-full rounded object-contain" />
             <div className="pointer-events-none absolute inset-0">
@@ -90,7 +90,7 @@ export function DetectionPreview({ detection, imageUrl, showWeak, onShowWeakChan
 
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
         {legend.map((label) => (
-          <span key={label} className="flex items-center gap-1 text-xs text-gray-600">
+          <span key={label} className="flex items-center gap-1 text-xs text-ink-soft">
             <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: BOX_COLORS[label] ?? FALLBACK_COLOR }} />
             {label}
           </span>
@@ -98,19 +98,19 @@ export function DetectionPreview({ detection, imageUrl, showWeak, onShowWeakChan
       </div>
 
       {weakOnly ? (
-        <p className="mt-1.5 text-xs text-gray-500">
+        <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
           The trained model only made weak guesses for this photo, so its result was not used. The dashed boxes show what it saw.
         </p>
       ) : (
         weak.length > 0 && (
-          <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-xs text-gray-500">
+          <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-xs text-ink-soft">
             <input type="checkbox" checked={Boolean(showWeak)} onChange={(e) => onShowWeakChange?.(e.target.checked)} />
             Also show {weak.length} weaker guess{weak.length === 1 ? '' : 'es'} (dashed)
           </label>
         )
       )}
 
-      <p className="mt-1 text-[11px] text-gray-400">
+      <p className="mt-1 text-[11px] text-ink-muted">
         Trained model saw:{' '}
         {all.map((d) => `${d.label} ${Math.round(d.confidence * 100)}%${d.trusted ? '' : ' (weak)'}`).join(' · ')}
       </p>

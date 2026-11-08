@@ -1,16 +1,30 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { ShieldAlert, Mail, Lock, ArrowRight, MapPin, TriangleAlert } from 'lucide-react'
+import { Mail, Lock, ArrowRight, MapPin, TriangleAlert, ShieldCheck, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { homePathFor } from '../lib/homePath'
+import AuthShell from '../components/layout/AuthShell'
+import { Field, Input } from '../components/ui/Field'
+import Button from '../components/ui/Button'
+import Modal from '../components/ui/Modal'
+
+const FEATURES = [
+  { icon: MapPin, text: 'Pin the exact hazard location on the map' },
+  { icon: TriangleAlert, text: 'AI-assisted severity detection' },
+  { icon: ShieldCheck, text: 'Verified by your local government' },
+]
 
 export default function Login() {
-  const { signIn, user, profile, loading } = useAuth()
+  const { signIn, sendPasswordReset, user, profile, loading } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetSubmitting, setResetSubmitting] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -37,125 +51,155 @@ export default function Login() {
     setSubmitting(false)
   }
 
+  function openResetDialog() {
+    setResetEmail(email)
+    setResetOpen(true)
+  }
+
+  async function handleResetRequest(e) {
+    e.preventDefault()
+    setResetSubmitting(true)
+    const { error } = await sendPasswordReset(resetEmail.trim())
+    if (error) {
+      toast.error(error.message)
+    } else {
+      toast.success('Reset link sent. Check your email (and spam folder).')
+      setResetOpen(false)
+    }
+    setResetSubmitting(false)
+  }
+
   // Already logged in? Skip this page and go straight to the Hazard Map.
   if (!loading && user && profile) return <Navigate to={homePathFor(profile.user_type)} replace />
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-white lg:flex-row">
-      {/* ---------- LEFT: BRAND PANEL ---------- */}
-      <div className="relative flex w-full flex-col justify-between overflow-hidden bg-gradient-to-br from-[#0F4C81] via-[#0B3A63] to-[#082A49] px-8 py-10 lg:w-[46%] lg:px-14 lg:py-14">
-        {/* decorative glow blobs */}
-        <div className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-[#FCD116]/20 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-32 -right-16 h-80 w-80 rounded-full bg-[#CE1126]/25 blur-3xl" />
-        <div className="pointer-events-none absolute top-1/3 right-0 h-40 w-40 rounded-full bg-[#FCD116]/10 blur-2xl" />
-
-        {/* Top: logo mark */}
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#FCD116] shadow-lg shadow-black/20">
-            <ShieldAlert className="h-6 w-6 text-[#0F4C81]" strokeWidth={2.4} />
-          </div>
-          <span className="text-sm font-semibold tracking-wide text-white/90">
-            ROAD HAZARD REPORTING SYSTEM
-          </span>
-        </div>
-
-        {/* Middle: headline */}
-        <div className="relative z-10 my-10 lg:my-0">
-          <h1 className="text-3xl font-extrabold leading-tight text-white lg:text-4xl">
+    <>
+      <AuthShell
+        headline={
+          <>
             See a hazard.
             <br />
-            Report it. <span className="text-[#FCD116]">Fix it.</span>
-          </h1>
-          <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/70">
-            Help your community by reporting potholes, cracks, and road damage —
-            verified by your local government, visible to everyone.
-          </p>
-
-          {/* feature bullets */}
-          <div className="mt-8 space-y-3">
-            <div className="flex items-center gap-3 text-sm text-white/80">
-              <MapPin className="h-4 w-4 shrink-0 text-[#FCD116]" />
-              Pin the exact hazard location on the map
-            </div>
-            <div className="flex items-center gap-3 text-sm text-white/80">
-              <TriangleAlert className="h-4 w-4 shrink-0 text-[#FCD116]" />
-              AI-assisted severity detection
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom: road-line motif */}
-        <div className="relative z-10">
-          <div
-            className="h-1 w-full rounded-full opacity-60"
-            style={{
-              backgroundImage:
-                'repeating-linear-gradient(90deg, #FCD116 0px, #FCD116 18px, transparent 18px, transparent 32px)',
-            }}
-          />
-          <p className="mt-3 text-xs text-white/40">
-            Local Government Unit &middot; Public Infrastructure Safety
-          </p>
-        </div>
-      </div>
-
-      {/* ---------- RIGHT: FORM PANEL ---------- */}
-      <div className="flex flex-1 items-center justify-center px-6 py-12 lg:px-16">
-        <div className="w-full max-w-sm">
-          <h2 className="text-2xl font-bold text-[#0F4C81]">Welcome back</h2>
-          <p className="mt-1 text-sm text-gray-500">Sign in to your account to continue</p>
-
-          <form onSubmit={handleSubmit} className="mt-8 space-y-5">
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Email</label>
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-3 text-sm text-[#0F4C81] transition focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
-                  placeholder="you@example.com"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-[#0F4C81]">Password</label>
-              <div className="relative">
-                <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 py-3 pl-10 pr-3 text-sm text-[#0F4C81] transition focus:border-[#0F4C81] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#0F4C81]/10"
-                  placeholder="••••••••"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="group flex w-full items-center justify-center gap-2 rounded-xl bg-[#0F4C81] py-3 text-sm font-semibold text-white shadow-lg shadow-[#0F4C81]/20 transition hover:bg-[#0B3A63] hover:shadow-xl hover:shadow-[#0F4C81]/30 active:scale-[0.99] disabled:opacity-60"
-            >
-              {submitting ? 'Signing in...' : 'Sign In'}
-              {!submitting && (
-                <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
-              )}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm text-gray-500">
+            Report it. Make it <span className="text-white/80">safer.</span>
+          </>
+        }
+        description="Help your community by reporting potholes, cracks, and road damage — verified by your local government and visible to everyone."
+        features={FEATURES}
+        title="Welcome back"
+        subtitle="Sign in to your account to continue"
+        footer={
+          <>
             New citizen user?{' '}
-            <Link to="/register" className="font-semibold text-[#0F4C81] hover:underline">
+            <Link to="/register" className="font-semibold text-primary hover:underline">
               Create an account
             </Link>
+          </>
+        }
+      >
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <Field label="Email" htmlFor="login-email" required>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+              <Input
+                id="login-email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="pl-10"
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </div>
+          </Field>
+
+          <Field label="Password" htmlFor="login-password" required>
+            <div className="relative">
+              <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+              <Input
+                id="login-password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="pl-10 pr-11"
+                placeholder="••••••••"
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                title={showPassword ? 'Hide password' : 'Show password'}
+                className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-ink-muted transition hover:bg-canvas hover:text-primary"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </Field>
+
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={openResetDialog}
+              className="text-xs font-semibold text-primary transition hover:underline"
+            >
+              Forgot password?
+            </button>
+          </div>
+
+          <Button
+            type="submit"
+            variant="gradient"
+            size="lg"
+            loading={submitting}
+            iconRight={submitting ? undefined : ArrowRight}
+            className="w-full"
+          >
+            {submitting ? 'Signing in…' : 'Sign In'}
+          </Button>
+
+          <p className="text-center text-[11px] leading-relaxed text-ink-muted">
+            Use the account provided by your LGU administrator or create a citizen account.
           </p>
-        </div>
-      </div>
-    </div>
+        </form>
+      </AuthShell>
+
+      <Modal
+        open={resetOpen}
+        onClose={() => setResetOpen(false)}
+        size="sm"
+        title="Reset your password"
+        description="We'll email you a secure link to choose a new password."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setResetOpen(false)} disabled={resetSubmitting}>
+              Cancel
+            </Button>
+            <Button type="submit" form="reset-password-form" variant="gradient" loading={resetSubmitting}>
+              {resetSubmitting ? 'Sending…' : 'Send reset link'}
+            </Button>
+          </>
+        }
+      >
+        <form id="reset-password-form" onSubmit={handleResetRequest} className="space-y-4">
+          <Field label="Email" htmlFor="reset-email" required>
+            <div className="relative">
+              <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+              <Input
+                id="reset-email"
+                type="email"
+                required
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                className="pl-10"
+                placeholder="you@example.com"
+                autoComplete="email"
+              />
+            </div>
+          </Field>
+        </form>
+      </Modal>
+    </>
   )
 }

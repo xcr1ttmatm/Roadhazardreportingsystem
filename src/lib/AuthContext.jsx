@@ -64,6 +64,22 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut()
   }
 
+  /**
+   * Changes the signed-in user's password. Requires an active session — the
+   * caller is responsible for verifying the current password first.
+   */
+  async function updatePassword(newPassword) {
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword })
+    return { data, error }
+  }
+
+  /** Sends a password-recovery email that returns to /reset-password. */
+  async function sendPasswordReset(email) {
+    const redirectTo = `${window.location.origin}/reset-password`
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+    return { data, error }
+  }
+
   const value = {
     session,
     user: session?.user ?? null,
@@ -72,6 +88,8 @@ export function AuthProvider({ children }) {
     signUp,
     signIn,
     signOut,
+    updatePassword,
+    sendPasswordReset,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet'
+import { MapContainer, Marker, Popup, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { Calendar, LocateFixed } from 'lucide-react'
+import { Calendar, LocateFixed, Map as MapIcon, MapPin, ShieldCheck, Wrench } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_ZOOM_OUT, CITY_MIN_ZOOM, USER_FOCUS_ZOOM } from '../lib/mapConfig'
 import { useUserLocation } from '../lib/useUserLocation'
@@ -9,6 +9,9 @@ import { countNearbyHazards } from '../lib/geo'
 import { SEVERITY_COLORS } from '../lib/severity'
 import { getDisplayPosition } from '../lib/reportLocation'
 import ImageLightbox from '../components/ImageLightbox'
+import BaseTiles from '../components/map/BaseTiles'
+import PageHeader from '../components/ui/PageHeader'
+import LoadingState from '../components/ui/LoadingState'
 
 // Builds the Before/After photo sets for a report. "Before" leads with
 // whichever photo the admin picked as featured at approval time; "After"
@@ -56,25 +59,25 @@ function PopupImage({ report, onOpenLightbox }) {
         <img
           src={activeSet[0].url}
           alt=""
-          className="h-28 w-full cursor-zoom-in rounded-lg object-cover transition hover:opacity-90"
+          className="max-h-40 w-full cursor-zoom-in rounded-lg bg-canvas object-contain ring-1 ring-line transition hover:opacity-90"
         />
       </button>
       {(before.length > 1 || after.length > 1) && (
-        <p className="mt-1 text-center text-[10px] text-gray-400">Click photo to view all & zoom</p>
+        <p className="mt-1 text-center text-[10px] text-ink-muted">Click photo to view all & zoom</p>
       )}
       {hasBoth && (
-        <div className="mt-1 flex overflow-hidden rounded-md border border-gray-200 text-[10px] font-medium">
+        <div className="mt-1 flex overflow-hidden rounded-md border border-line text-[10px] font-semibold">
           <button
             type="button"
             onClick={() => setShowingAfter(false)}
-            className={`flex-1 py-1 transition ${!showingAfter ? 'bg-[#0F4C81] text-white' : 'bg-white text-gray-500'}`}
+            className={`flex-1 py-1 transition ${!showingAfter ? 'bg-primary text-white' : 'bg-white text-ink-soft'}`}
           >
             Before
           </button>
           <button
             type="button"
             onClick={() => setShowingAfter(true)}
-            className={`flex-1 py-1 transition ${showingAfter ? 'bg-emerald-600 text-white' : 'bg-white text-gray-500'}`}
+            className={`flex-1 py-1 transition ${showingAfter ? 'bg-success text-white' : 'bg-white text-ink-soft'}`}
           >
             After
           </button>
@@ -186,6 +189,7 @@ export default function HazardMap() {
   }
 
   const activeCount = reports.filter((r) => r.status === 'approved').length // repaired ones are no longer active
+  const resolvedCount = reports.filter((r) => r.status === 'resolved').length
   const nearbyCount = countNearbyHazards(userPos, reports)
 
   useEffect(() => {
@@ -203,18 +207,39 @@ export default function HazardMap() {
   }, [])
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="text-2xl font-bold text-[#0F4C81]">Hazard Map</h1>
-      <p className="mt-1 text-sm text-gray-500">
-        LGU-verified road hazards across Iligan City.
-        {!loading && ` ${activeCount} active hazard${activeCount === 1 ? '' : 's'}.`}
-      </p>
-      <p data-testid="location-status" className="mt-1 flex items-start gap-1.5 text-sm text-gray-500">
-        <LocateFixed className={`mt-0.5 h-4 w-4 shrink-0 ${locStatus === 'on' ? 'text-sky-500' : 'text-gray-400'}`} />
-        <span>{locationMessage(locStatus, nearbyCount)}</span>
-      </p>
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Public Safety"
+        title="Hazard Map"
+        description={
+          loading
+            ? 'LGU-verified road hazards across Iligan City.'
+            : `LGU-verified road hazards across Iligan City. ${activeCount} active hazard${activeCount === 1 ? '' : 's'}.`
+        }
+        icon={MapIcon}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-xl border border-line bg-white px-3 py-2 text-[11px] font-semibold text-ink-soft shadow-soft">
+              <span className="h-2 w-2 rounded-full bg-danger" />
+              {activeCount} active
+            </span>
+            <span className="flex items-center gap-1.5 rounded-xl border border-line bg-white px-3 py-2 text-[11px] font-semibold text-ink-soft shadow-soft">
+              <span className="h-2 w-2 rounded-full bg-success" />
+              {resolvedCount} repaired
+            </span>
+          </div>
+        }
+      />
 
-      <div className="relative mt-6 h-[75vh] min-h-[420px] overflow-hidden rounded-2xl border border-gray-200 shadow-sm">
+      <div
+        data-testid="location-status"
+        className="flex items-start gap-2 rounded-2xl border border-line bg-white px-3.5 py-2.5 text-xs shadow-soft"
+      >
+        <LocateFixed className={`mt-0.5 h-4 w-4 shrink-0 ${locStatus === 'on' ? 'text-info' : 'text-ink-muted'}`} />
+        <span className="leading-relaxed text-ink-soft">{locationMessage(locStatus, nearbyCount)}</span>
+      </div>
+
+      <div className="relative h-[55vh] min-h-[340px] overflow-hidden rounded-2xl border border-line shadow-float sm:h-[65vh] sm:min-h-[420px] lg:h-[75vh]">
         <MapContainer
           center={CITY_CENTER}
           zoom={CITY_ZOOM_OUT}
@@ -223,10 +248,7 @@ export default function HazardMap() {
           maxBoundsViscosity={1.0}
           className="leaflet-container"
         >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
+          <BaseTiles />
 
           <UserLocationLayer position={userPos} centerRequest={centerRequest} />
 
@@ -242,18 +264,19 @@ export default function HazardMap() {
                     report={report}
                     onOpenLightbox={(images, index) => setLightbox({ images, index })}
                   />
-                  <p className="text-sm font-semibold text-[#0F4C81]">
+                  <p className="text-sm font-semibold text-ink">
                     {report.title || 'Road hazard'}
                   </p>
-                  <p className="mt-1 line-clamp-3 text-xs text-gray-600">{report.description}</p>
+                  <p className="mt-1 line-clamp-3 text-xs text-ink-soft">{report.description}</p>
                   {report.status === 'resolved' ? (
-                    <span className="mt-2 inline-block rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-medium text-white">
+                    <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-semibold text-white">
+                      <Wrench className="h-2.5 w-2.5" />
                       Resolved
                     </span>
                   ) : (
                     report.severity && (
                       <span
-                        className="mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-medium capitalize text-white"
+                        className="mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize text-white"
                         style={{
                           backgroundColor: SEVERITY_COLORS[report.severity?.toLowerCase()] || SEVERITY_COLORS.default,
                         }}
@@ -263,13 +286,13 @@ export default function HazardMap() {
                     )
                   )}
                   {report.approved_at && (
-                    <div className="mt-2 flex items-center gap-1 text-[11px] text-gray-400">
+                    <div className="mt-2 flex items-center gap-1 text-[11px] text-ink-muted">
                       <Calendar className="h-3 w-3" />
                       Approved {formatDate(report.approved_at)}
                     </div>
                   )}
                   {report.status === 'resolved' && report.resolved_at && (
-                    <div className="mt-1 flex items-center gap-1 text-[11px] text-emerald-600">
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-success">
                       <Calendar className="h-3 w-3" />
                       Repaired {formatDate(report.resolved_at)}
                     </div>
@@ -286,14 +309,17 @@ export default function HazardMap() {
           onClick={handleLocateClick}
           aria-label="Show my location"
           title="Show my location"
-          className="absolute right-3 top-3 z-[400] flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 bg-white text-[#0F4C81] shadow-md transition hover:bg-gray-50"
+          className="absolute right-3 top-3 z-[400] flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-white text-primary shadow-float transition hover:bg-primary-light/40"
         >
           <LocateFixed className="h-5 w-5" />
         </button>
 
         {/* Legend */}
-        <div className="absolute bottom-4 left-4 z-[400] rounded-xl border border-gray-200 bg-white/95 px-4 py-3 shadow-md backdrop-blur">
-          <p className="mb-2 text-xs font-semibold text-[#0F4C81]">Severity</p>
+        <div className="absolute bottom-4 left-4 z-[400] rounded-xl border border-line bg-white/95 px-4 py-3 shadow-float backdrop-blur">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-soft">
+            <ShieldCheck className="h-3 w-3 text-primary" />
+            Severity
+          </p>
           <div className="space-y-1.5">
             <LegendRow color={SEVERITY_COLORS.severe} label="Severe" />
             <LegendRow color={SEVERITY_COLORS.moderate} label="Moderate" />
@@ -303,10 +329,20 @@ export default function HazardMap() {
         </div>
       </div>
 
-      {!loading && reports.length === 0 && (
-        <p className="mt-4 text-center text-sm text-gray-400">
-          No approved hazards yet — once the LGU approves reports, they'll appear here.
-        </p>
+      {loading ? (
+        <LoadingState label="Loading verified hazards…" />
+      ) : (
+        reports.length === 0 && (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-line bg-white/60 px-6 py-10 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-light to-secondary-light text-primary">
+              <MapPin className="h-5 w-5" />
+            </span>
+            <p className="mt-3 text-sm font-semibold text-ink">No approved hazards yet</p>
+            <p className="mt-1 max-w-sm text-xs leading-relaxed text-ink-soft">
+              Once the LGU approves reports, they'll appear here.
+            </p>
+          </div>
+        )
       )}
 
       {lightbox && (
@@ -325,7 +361,7 @@ function LegendRow({ color, label }) {
   return (
     <div className="flex items-center gap-2">
       <span className="h-3 w-3 rounded-full border-2 border-white shadow" style={{ backgroundColor: color }} />
-      <span className="text-xs text-gray-600">{label}</span>
+      <span className="text-xs text-ink-soft">{label}</span>
     </div>
   )
 }
