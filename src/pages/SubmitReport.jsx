@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { MapContainer, Marker, useMapEvents, useMap } from 'react-leaflet'
+import { MapContainer, Marker, CircleMarker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { ImagePlus, LocateFixed, Send, X, FilePlus, MapPin, Camera, Info } from 'lucide-react'
+import { ImagePlus, LocateFixed, Send, X, FilePlus, MapPin, Camera, Info, AlertTriangle } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
+import { isInsideIligan } from '../lib/geo'
 import PageHeader from '../components/ui/PageHeader'
 import BaseTiles from '../components/map/BaseTiles'
+import CoverageBoundary from '../components/map/CoverageBoundary'
 import Card, { CardHeader } from '../components/ui/Card'
-import { Field, Select, Textarea } from '../components/ui/Field'
+import { Field, Textarea } from '../components/ui/Field'
 import Button from '../components/ui/Button'
+import HazardTypePicker from '../components/HazardTypePicker'
 
 // Fix Leaflet's default marker icon, which breaks under Vite's bundling by default
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
@@ -24,13 +27,25 @@ L.Marker.prototype.options.icon = L.icon({
   popupAnchor: [1, -34],
 })
 
-function LocationMarker({ position, setPosition }) {
+function LocationMarker({ position, setPosition, invalid }) {
   useMapEvents({
     click(e) {
       setPosition(e.latlng)
     },
   })
-  return position ? <Marker position={position} /> : null
+  if (!position) return null
+
+  // An out-of-city pin gets a red dot (rather than the normal pin) so it is
+  // obvious that the point is not inside the coverage area.
+  return invalid ? (
+    <CircleMarker
+      center={position}
+      radius={8}
+      pathOptions={{ color: '#ffffff', weight: 2, fillColor: '#dc2626', fillOpacity: 1 }}
+    />
+  ) : (
+    <Marker position={position} />
+  )
 }
 
 function FlyToPosition({ position }) {
@@ -40,9 +55,6 @@ function FlyToPosition({ position }) {
   }, [position, map])
   return null
 }
-
-// Kept in sync with the categories the CV detection model uses (Module 8)
-const HAZARD_TYPE_OPTIONS = ['Pothole', 'Debris', 'Crack', 'Scouring']
 
 export default function SubmitReport() {
   const { user } = useAuth()
@@ -55,6 +67,10 @@ export default function SubmitReport() {
   const [position, setPosition] = useState(null)
   const [locating, setLocating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+
+  // True when the current pin is outside the Iligan City service area. Kept
+  // derived (not separate state) so the map, message and button can never drift.
+  const outsideCity = position ? !isInsideIligan(position.lat, position.lng) : false
 
   const MAX_IMAGES = 5
 
@@ -92,7 +108,15 @@ export default function SubmitReport() {
     setLocating(true)
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        if (!isInsideIligan(next.lat, next.lng)) {
+          // Do not drop a pin outside the coverage area (and do not let the map
+          // fly there) — tell the user why instead.
+          toast.error('You appear to be outside Iligan City. Reports are only accepted within Iligan City.')
+          setLocating(false)
+          return
+        }
+        setPosition(next)
         setLocating(false)
       },
       () => {
@@ -108,6 +132,9 @@ export default function SubmitReport() {
     if (!title) return toast.error('Please select what you are reporting')
     if (!description.trim()) return toast.error('Please describe the hazard')
     if (!position) return toast.error('Please pin the hazard location on the map')
+    if (!isInsideIligan(position.lat, position.lng)) {
+      return toast.error('Reports are only accepted for locations within Iligan City. Move the pin inside the blue boundary.')
+    }
     if (imageFiles.length === 0) return toast.error('Please upload at least one photo of the hazard')
 
     setSubmitting(true)
@@ -151,7 +178,9 @@ export default function SubmitReport() {
       if (imageError) throw imageError
 
       toast.success('Hazard report submitted! An LGU admin will review it.')
-      navigate('/citizen')
+      // Open the new report in "My Reports" so the citizen can review the exact
+      // location they pinned before leaving the flow.
+      navigate(`/citizen/reports?report=${report.report_id}`)
     } catch (err) {
       console.error(err)
       toast.error(err.message || 'Something went wrong submitting your report')
@@ -173,7 +202,8 @@ export default function SubmitReport() {
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <p className="text-xs leading-relaxed text-ink-soft">
           Your first photo is used for AI-assisted hazard detection. Reports are reviewed by an LGU admin before they
-          appear on the public map.
+          appear on the public map. Only hazards located inside <strong className="font-semibold text-ink">Iligan City</strong>{' '}
+          are accepted.
         </p>
       </div>
 
@@ -183,18 +213,7 @@ export default function SubmitReport() {
           <CardHeader title="Report details" description="What did you find and how does it look?" icon={Camera} />
 
           <div className="mt-5 space-y-5">
-            <Field label="Hazard Type" htmlFor="hazard-type" required>
-              <Select id="hazard-type" required value={title} onChange={(e) => setTitle(e.target.value)}>
-                <option value="" disabled>
-                  Select what you're reporting…
-                </option>
-                {HAZARD_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </Select>
-            </Field>
+            <HazardTypePicker value={title} onChange={setTitle} />
 
             <Field label="Description" htmlFor="hazard-description" required>
               <Textarea
@@ -263,7 +282,11 @@ export default function SubmitReport() {
         {/* Right column: map */}
         <Card className="flex flex-col p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardHeader title="Hazard location" description="Tap the map to place the pin." icon={MapPin} />
+            <CardHeader
+              title="Hazard location"
+              description="Tap inside the blue Iligan City boundary to place the pin."
+              icon={MapPin}
+            />
             <button
               type="button"
               onClick={handleUseCurrentLocation}
@@ -285,17 +308,38 @@ export default function SubmitReport() {
               className="leaflet-container"
             >
               <BaseTiles />
-              <LocationMarker position={position} setPosition={setPosition} />
+              <CoverageBoundary />
+              <LocationMarker position={position} setPosition={setPosition} invalid={outsideCity} />
               <FlyToPosition position={position} />
             </MapContainer>
           </div>
 
-          <div className="mt-3 flex items-start gap-2 rounded-xl bg-canvas/70 px-3 py-2.5 text-xs">
-            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-            <span className="text-ink-soft">
-              {position
-                ? `Pinned: ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}`
-                : 'Tap or click on the map to pin the hazard location.'}
+          <div
+            role={outsideCity ? 'alert' : undefined}
+            aria-live="polite"
+            className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs ${
+              outsideCity ? 'border border-danger/20 bg-danger-light/60' : 'bg-canvas/70'
+            }`}
+          >
+            {outsideCity ? (
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" />
+            ) : (
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+            )}
+            <span className={outsideCity ? 'text-danger' : 'text-ink-soft'}>
+              {outsideCity ? (
+                <>
+                  <strong className="font-semibold">Outside Iligan City.</strong> Reports are only accepted
+                  within Iligan City. Move the pin inside the blue boundary.
+                </>
+              ) : position ? (
+                <>
+                  Pinned: {position.lat.toFixed(5)}, {position.lng.toFixed(5)}{' '}
+                  <span className="font-medium text-success">· within Iligan City</span>
+                </>
+              ) : (
+                'Tap or click inside the blue Iligan City boundary to pin the hazard location.'
+              )}
             </span>
           </div>
         </Card>
@@ -303,14 +347,18 @@ export default function SubmitReport() {
         {/* Submit */}
         <div className="xl:col-span-2">
           <Card className="flex flex-col items-start justify-between gap-3 p-4 sm:flex-row sm:items-center">
-            <p className="text-xs text-ink-soft">
-              By submitting, you confirm the details are accurate to the best of your knowledge.
+            <p className={`text-xs ${outsideCity ? 'font-medium text-danger' : 'text-ink-soft'}`}>
+              {outsideCity
+                ? 'This pin is outside Iligan City. Move it inside the blue boundary before submitting.'
+                : 'By submitting, you confirm the details are accurate to the best of your knowledge.'}
             </p>
             <Button
               type="submit"
               variant="gradient"
               size="lg"
               loading={submitting}
+              disabled={outsideCity}
+              title={outsideCity ? 'Reports are only accepted within Iligan City' : undefined}
               iconRight={submitting ? undefined : Send}
               className="w-full sm:w-auto"
             >

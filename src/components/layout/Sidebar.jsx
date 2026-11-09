@@ -33,28 +33,46 @@ export default function Sidebar({
       aria-label="Primary navigation"
     >
       {/* Brand */}
-      <div className={cn('flex items-center gap-3 px-4 pb-3 pt-5', collapsed && 'lg:justify-center lg:px-2')}>
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center text-primary">
-          <BrandLogo className="h-12 w-12" />
+      <div className={cn('px-4 pb-3 pt-5', collapsed && 'lg:px-2')}>
+        <div className={cn('flex items-center gap-3', collapsed && 'lg:justify-center')}>
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center text-primary">
+            <BrandLogo className="h-12 w-12" />
+          </div>
+
+          <p
+            className={cn(
+              'min-w-0 flex-1 truncate text-sm font-bold leading-tight tracking-tight text-ink',
+              collapsed && 'lg:hidden'
+            )}
+          >
+            Road Hazard
+          </p>
+
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className={cn(
+              'hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-muted transition hover:bg-canvas hover:text-primary lg:flex',
+              collapsed && 'lg:hidden'
+            )}
+          >
+            <PanelLeftClose className="h-4 w-4" />
+          </button>
         </div>
 
-        <div className={cn('min-w-0 flex-1', collapsed && 'lg:hidden')}>
-          <p className="truncate text-sm font-bold leading-tight tracking-tight text-ink">Road Hazard</p>
-          <p className="truncate text-[10px] font-bold uppercase tracking-[0.14em] text-primary">{portalTag}</p>
-        </div>
-
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        {/* Full-width second line so long portal tags (e.g. "LGU Administration")
+            are never squeezed against the logo or collapse button. */}
+        <p
+          title={portalTag}
           className={cn(
-            'hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-muted transition hover:bg-canvas hover:text-primary lg:flex',
+            'mt-1.5 break-words pl-[60px] text-[10px] font-bold uppercase leading-snug tracking-[0.12em] text-primary',
             collapsed && 'lg:hidden'
           )}
         >
-          <PanelLeftClose className="h-4 w-4" />
-        </button>
+          {portalTag}
+        </p>
       </div>
 
       {collapsed && (
@@ -131,8 +149,15 @@ export default function Sidebar({
         >
           <Avatar name={profile?.full_name || profile?.username} size="sm" />
           <div className={cn('min-w-0 flex-1', collapsed && 'lg:hidden')}>
-            <p className="truncate text-xs font-semibold text-ink">{profile?.username ?? 'Signed in'}</p>
-            <p className="truncate text-[10px] font-medium capitalize text-ink-muted">{profile?.user_type ?? ''}</p>
+            <p className="truncate text-xs font-semibold text-ink" title={profile?.username ?? 'Signed in'}>
+              {profile?.username ?? 'Signed in'}
+            </p>
+            <p
+              className="truncate text-[10px] font-medium capitalize text-ink-muted"
+              title={profile?.user_type ?? undefined}
+            >
+              {profile?.user_type ?? ''}
+            </p>
           </div>
           <button
             type="button"

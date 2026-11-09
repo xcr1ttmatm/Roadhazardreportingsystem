@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { MapContainer, Marker } from 'react-leaflet'
+import { MapContainer, Marker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
 import {
-  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil, Trash2, ImagePlus, ClipboardList, Info,
+  ArrowLeft, Calendar, User, Mail, MapPin, Scan, Sparkles, UserPlus, Download, Send, CheckCircle2, XCircle, IdCard, Home, Undo2, Pencil, Trash2, ImagePlus, ClipboardList, Info, Maximize2,
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { isInsideIligan } from '../lib/geo'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
 import { deleteHazardReport } from '../lib/deleteReport'
@@ -22,6 +23,8 @@ import { Select, Textarea } from '../components/ui/Field'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
 import BaseTiles from '../components/map/BaseTiles'
+import CoverageBoundary from '../components/map/CoverageBoundary'
+import { CITY_BOUNDS } from '../lib/mapConfig'
 import { cn } from '../components/ui/utils'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
@@ -33,6 +36,26 @@ L.Marker.prototype.options.icon = L.icon({
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
 })
+
+/**
+ * Small overlay inside the report map that zooms out to the full Iligan City
+ * coverage outline. The map opens tight on the pin (zoom 16), so without this
+ * the boundary would often sit off-screen.
+ */
+function FitCityButton() {
+  const map = useMap()
+  return (
+    <button
+      type="button"
+      onClick={() => map.flyToBounds(CITY_BOUNDS, { padding: [20, 20], duration: 0.6 })}
+      title="Zoom out to the Iligan City coverage boundary"
+      className="absolute right-3 top-3 z-[1000] flex items-center gap-1.5 rounded-lg border border-line bg-white/95 px-2.5 py-1.5 text-[11px] font-semibold text-ink shadow-soft backdrop-blur transition hover:border-primary/40 hover:text-primary"
+    >
+      <Maximize2 className="h-3.5 w-3.5" />
+      Fit to Iligan
+    </button>
+  )
+}
 
 const ASSIGNMENT_LABELS = {
   pending: 'Pending',
@@ -87,6 +110,10 @@ export default function ReportDetail() {
   const { reportId } = useParams()
   const navigate = useNavigate()
   const [report, setReport] = useState(null)
+  // Same coordinate the page maps and prints: the inspector's correction when
+  // present, otherwise the citizen's original pin.
+  const detectionLat = report?.verified_latitude ?? report?.latitude
+  const detectionLng = report?.verified_longitude ?? report?.longitude
   const [detection, setDetection] = useState(null)
   const [loading, setLoading] = useState(true)
   const [detecting, setDetecting] = useState(false)
@@ -211,6 +238,10 @@ export default function ReportDetail() {
   async function handleRunDetection() {
     if (!report?.hazard_images?.[0]?.image_url) {
       toast.error('This report has no image to analyze')
+      return
+    }
+    if (report && !isInsideIligan(detectionLat, detectionLng)) {
+      toast.error('This report is outside Iligan City, so AI detection is unavailable for it.')
       return
     }
 
@@ -668,6 +699,9 @@ export default function ReportDetail() {
   const position = hasCorrectedLocation
     ? [Number(report.verified_latitude), Number(report.verified_longitude)]
     : [Number(report.latitude), Number(report.longitude)]
+  // Detection only makes sense for the service area; an out-of-city legacy
+  // report stays visible but cannot trigger a new analysis run.
+  const reportOutsideCity = !isInsideIligan(position[0], position[1])
   const images = report.hazard_images || []
   const galleryImages = [
     ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo", imageId: img.image_id })),
@@ -918,9 +952,9 @@ export default function ReportDetail() {
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Left: photo + description */}
-        <div className="space-y-5">
+        <div className="contents lg:block lg:space-y-5">
           {images.length > 0 && (
-            <Card className="p-5">
+            <Card className="order-1 p-5">
               <h2 className={cn(sectionTitle, 'mb-3')}>
                 Citizen's Photos ({images.length})
               </h2>
@@ -957,7 +991,7 @@ export default function ReportDetail() {
           )}
 
           {inspectionPhotos.length > 0 && (
-            <Card className="p-5">
+            <Card className="order-1 p-5">
               <h2 className={cn(sectionTitle, 'mb-3')}>
                 Inspector's Site Photos ({inspectionPhotos.length})
               </h2>
@@ -981,7 +1015,7 @@ export default function ReportDetail() {
           )}
 
           {resolvedImages.length > 0 && (
-            <Card className="border-success/20 bg-gradient-to-br from-success-light/40 via-white to-white p-5">
+            <Card className="order-1 border-success/20 bg-gradient-to-br from-success-light/40 via-white to-white p-5">
               <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-success">
                 After Repair Photos ({resolvedImages.length})
               </h2>
@@ -1004,7 +1038,7 @@ export default function ReportDetail() {
             </Card>
           )}
 
-          <Card className="p-5">
+          <Card className="order-2 p-5">
             <div className="flex items-center justify-between">
               <h2 className={sectionTitle}>Description</h2>
               {!editingDescription && (
@@ -1042,7 +1076,7 @@ export default function ReportDetail() {
             )}
           </Card>
 
-          <Card className="p-5">
+          <Card className="order-3 p-5">
             <h2 className={sectionTitle}>Reported By</h2>
             <div className="mt-3 space-y-2">
               <p className="flex items-center gap-2 text-sm text-ink-soft">
@@ -1065,7 +1099,7 @@ export default function ReportDetail() {
           </Card>
 
           {/* AI-Assisted Report */}
-          <Card className="p-5">
+          <Card className="order-6 p-5">
             <div className="flex items-center justify-between">
               <h2 className={sectionTitle}>
                 <Sparkles className="h-4 w-4 text-secondary" />
@@ -1123,36 +1157,64 @@ export default function ReportDetail() {
         </div>
 
         {/* Right: map + detection + next steps */}
-        <div className="space-y-5">
-          <Card className="overflow-hidden">
+        <div className="contents lg:block lg:space-y-5">
+          <Card className="order-5 overflow-hidden">
             <div className="h-64">
               <MapContainer center={position} zoom={16} className="leaflet-container" zoomControl={false}>
                 <BaseTiles />
+                {/* Same service-area outline the Hazard Map shows, so admins can
+                    confirm at a glance whether this report falls inside Iligan. */}
+                <CoverageBoundary />
                 <Marker position={position} />
+                <FitCityButton />
               </MapContainer>
             </div>
-            <div className="flex items-start gap-1.5 border-t border-line-soft px-4 py-3 text-xs text-ink-soft">
+            <div className="flex flex-wrap items-start gap-1.5 border-t border-line-soft px-4 py-3 text-xs text-ink-soft">
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-              {position[0].toFixed(5)}, {position[1].toFixed(5)}
-              {hasCorrectedLocation ? (
-                <span className="font-medium text-success">(inspector-verified location)</span>
-              ) : (
-                <span className="text-ink-muted">(citizen-reported location — not yet verified by inspector)</span>
-              )}
+              <span>
+                {position[0].toFixed(5)}, {position[1].toFixed(5)}
+                {hasCorrectedLocation ? (
+                  <span className="font-medium text-success"> (inspector-verified location)</span>
+                ) : (
+                  <span className="text-ink-muted"> (citizen-reported location — not yet verified by inspector)</span>
+                )}
+              </span>
+              <span
+                className={cn(
+                  'ml-auto inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                  reportOutsideCity ? 'bg-danger-light text-danger' : 'bg-success-light text-success'
+                )}
+              >
+                {reportOutsideCity ? <XCircle className="h-3 w-3" /> : <CheckCircle2 className="h-3 w-3" />}
+                {reportOutsideCity ? 'Outside Iligan City' : 'Inside Iligan City'}
+              </span>
             </div>
           </Card>
 
           {/* Computer Vision Detection */}
-          <Card className="p-5">
+          <Card className="order-4 p-5">
             <div className="flex items-center justify-between">
               <h2 className={sectionTitle}>
                 <Scan className="h-4 w-4 text-primary" />
                 Computer Vision Detection
               </h2>
-              <Button variant="primary" size="xs" onClick={handleRunDetection} disabled={detecting}>
+              <Button
+                variant="primary"
+                size="xs"
+                onClick={handleRunDetection}
+                disabled={detecting || reportOutsideCity}
+                title={reportOutsideCity ? 'This report is outside Iligan City' : undefined}
+              >
                 {detecting ? 'Analyzing…' : detection ? 'Re-run' : 'Run Detection'}
               </Button>
             </div>
+
+            {reportOutsideCity && (
+              <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-danger/20 bg-danger-light/50 px-2.5 py-2 text-xs text-danger">
+                <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>This report's location is outside Iligan City, so AI detection is unavailable.</span>
+              </p>
+            )}
 
             {detection ? (
               <div className="mt-3 space-y-2">
@@ -1193,7 +1255,7 @@ export default function ReportDetail() {
           </Card>
 
           {/* Assign Inspector */}
-          <Card className="p-5">
+          <Card className="order-7 p-5">
             <h2 className={sectionTitle}>
               <UserPlus className="h-4 w-4 text-primary" />
               Inspector Assignment

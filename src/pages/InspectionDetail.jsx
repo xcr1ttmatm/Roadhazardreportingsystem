@@ -10,6 +10,8 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
+import { CITY_BOUNDS } from '../lib/mapConfig'
+import { isInsideIligan } from '../lib/geo'
 import ImageLightbox from '../components/ImageLightbox'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -18,6 +20,7 @@ import { Textarea } from '../components/ui/Field'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
 import BaseTiles from '../components/map/BaseTiles'
+import CoverageBoundary from '../components/map/CoverageBoundary'
 import { cn } from '../components/ui/utils'
 
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
@@ -226,6 +229,10 @@ export default function InspectionDetail() {
   }
 
   async function handleConfirmLocation() {
+    if (!isInsideIligan(report.latitude, report.longitude)) {
+      toast.error('This report is outside Iligan City. Use Correct Location to move it inside the boundary.')
+      return
+    }
     setSavingLocation(true)
     try {
       const { error } = await supabase
@@ -247,6 +254,10 @@ export default function InspectionDetail() {
   async function handleSaveCorrectedLocation() {
     if (!correctedPosition) {
       toast.error('Click on the map to pin the correct location first')
+      return
+    }
+    if (!isInsideIligan(correctedPosition.lat, correctedPosition.lng)) {
+      toast.error('The corrected location must be inside Iligan City. Move the pin inside the blue boundary.')
       return
     }
     setSavingLocation(true)
@@ -330,6 +341,10 @@ export default function InspectionDetail() {
   }
 
   const position = [Number(report.latitude), Number(report.longitude)]
+  // The inspector may only move a report to a point inside the service area.
+  const correctedOutsideCity = Boolean(
+    correctingLocation && correctedPosition && !isInsideIligan(correctedPosition.lat, correctedPosition.lng)
+  )
   const images = report.hazard_images || []
   const galleryImages = [
     ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo" })),
@@ -617,8 +632,11 @@ export default function InspectionDetail() {
                 zoom={16}
                 className="leaflet-container"
                 zoomControl={false}
+                maxBounds={CITY_BOUNDS}
+                maxBoundsViscosity={1}
               >
                 <BaseTiles />
+                <CoverageBoundary />
                 {correctingLocation ? (
                   <CorrectionMarker position={correctedPosition} setPosition={setCorrectedPosition} />
                 ) : (
@@ -628,8 +646,27 @@ export default function InspectionDetail() {
             </div>
           </Card>
 
+          {correctingLocation && correctedOutsideCity && (
+            <p
+              role="alert"
+              className="flex items-start gap-1.5 rounded-xl border border-danger/20 bg-danger-light/60 px-3 py-2.5 text-xs text-danger"
+            >
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                <strong className="font-semibold">Outside Iligan City.</strong> Move the pin inside the blue boundary —
+                corrected locations must stay within Iligan City.
+              </span>
+            </p>
+          )}
+
           {correctingLocation ? (
-            <Button variant="gradient" size="sm" onClick={handleSaveCorrectedLocation} disabled={savingLocation}>
+            <Button
+              variant="gradient"
+              size="sm"
+              onClick={handleSaveCorrectedLocation}
+              disabled={savingLocation || correctedOutsideCity}
+              title={correctedOutsideCity ? 'The corrected location must be inside Iligan City' : undefined}
+            >
               {savingLocation ? 'Saving…' : 'Save Corrected Location'}
             </Button>
           ) : (

@@ -1,8 +1,24 @@
 import { useState, useEffect, useRef } from 'react'
-import { Bell, CheckCheck } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import {
+  Bell, CheckCheck, CheckCircle2, ChevronRight, Clock, Scan, Trash2, UserPlus, XCircle,
+} from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { cn } from './ui/utils'
+
+/**
+ * Where each role should land when opening a report from a notification.
+ * Citizens have no report-detail route, so they deep-link into "My Reports",
+ * which expands and scrolls to the matching card.
+ */
+function reportPathFor(userType, reportId) {
+  if (!reportId) return null
+  if (userType === 'admin') return `/admin/reports/${reportId}`
+  if (userType === 'inspector') return `/inspector/reports/${reportId}`
+  if (userType === 'citizen') return `/citizen/reports?report=${reportId}`
+  return null
+}
 
 function timeAgo(dateString) {
   const seconds = Math.floor((new Date() - new Date(dateString)) / 1000)
@@ -15,8 +31,36 @@ function timeAgo(dateString) {
   return `${days}d ago`
 }
 
+// Notification rows only store a title + message, so pick a friendly icon and
+// tone from the title. All class names are static strings so Tailwind keeps them.
+const NOTIFICATION_STYLES = {
+  deleted: { Icon: Trash2, wrap: 'bg-danger-light text-danger' },
+  rejected: { Icon: XCircle, wrap: 'bg-danger-light text-danger' },
+  assigned: { Icon: UserPlus, wrap: 'bg-primary-light text-primary' },
+  detection: { Icon: Scan, wrap: 'bg-secondary-light text-secondary' },
+  verified: { Icon: CheckCircle2, wrap: 'bg-success-light text-success' },
+  general: { Icon: Bell, wrap: 'bg-primary-light/70 text-primary' },
+}
+
+function notificationStyle(title = '') {
+  const text = String(title).toLowerCase()
+  if (text.includes('delet') || text.includes('remov')) return NOTIFICATION_STYLES.deleted
+  if (text.includes('reject')) return NOTIFICATION_STYLES.rejected
+  if (text.includes('assign') || text.includes('inspection') || text.includes('task')) {
+    return NOTIFICATION_STYLES.assigned
+  }
+  if (text.includes('detect') || text.includes('scan') || text.includes('generat') || text.startsWith('ai')) {
+    return NOTIFICATION_STYLES.detection
+  }
+  if (text.includes('verif') || text.includes('approv') || text.includes('resolv') || text.includes('complet')) {
+    return NOTIFICATION_STYLES.verified
+  }
+  return NOTIFICATION_STYLES.general
+}
+
 export default function NotificationBell() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
+  const navigate = useNavigate()
   const [notifications, setNotifications] = useState([])
   const [open, setOpen] = useState(false)
   const panelRef = useRef(null)
@@ -73,6 +117,16 @@ export default function NotificationBell() {
     await supabase.from('notifications').update({ is_read: true }).eq('notification_id', id)
   }
 
+  // Clicking a notification marks it read (optimistically, so the badge updates
+  // instantly) and opens the related report. Notifications without a report_id
+  // — e.g. "Report Deleted" — are read-only, so they just mark as read.
+  function handleNotificationClick(notification) {
+    if (!notification.is_read) markAsRead(notification.notification_id)
+    setOpen(false)
+    const path = reportPathFor(profile?.user_type, notification.report_id)
+    if (path) navigate(path)
+  }
+
   async function markAllRead() {
     const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.notification_id)
     if (unreadIds.length === 0) return
@@ -85,70 +139,129 @@ export default function NotificationBell() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        aria-label="Notifications"
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
+        aria-haspopup="dialog"
         aria-expanded={open}
         className={cn(
-          'relative flex h-9 w-9 items-center justify-center rounded-xl border border-transparent text-ink-soft transition hover:bg-canvas hover:text-primary',
-          open && 'border-line bg-canvas/70 text-primary'
+          'relative flex h-9 w-9 items-center justify-center rounded-xl border border-transparent text-ink-soft transition hover:bg-canvas hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+          open && 'border-line bg-white text-primary shadow-sm'
         )}
       >
-        <Bell className="h-[18px] w-[18px]" />
+        <Bell className="h-[18px] w-[18px]" strokeWidth={2.1} />
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gradient-to-br from-primary to-secondary px-1 text-[9px] font-bold text-white ring-2 ring-white">
+          <span
+            aria-hidden="true"
+            className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-brand-gradient px-1 text-[9px] font-bold leading-none text-white shadow-sm ring-2 ring-white"
+          >
             {unreadCount > 9 ? '9+' : unreadCount}
           </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-[340px] max-w-[calc(100vw-2rem)] origin-top-right animate-scale-in overflow-hidden rounded-2xl border border-line bg-white shadow-float max-sm:fixed max-sm:inset-x-4 max-sm:top-[4.5rem] max-sm:mt-0 max-sm:w-auto max-sm:max-w-none max-sm:origin-top">
-          <div className="flex items-center justify-between border-b border-line-soft px-4 py-3">
-            <div>
-              <p className="text-sm font-bold tracking-tight text-ink">Notifications</p>
-              <p className="text-[10px] font-medium text-ink-muted">
-                {unreadCount > 0 ? `${unreadCount} unread` : 'You are all caught up'}
-              </p>
+        <div
+          role="dialog"
+          aria-label="Notifications"
+          className="absolute right-0 z-50 mt-2 w-[380px] max-w-[calc(100vw-2rem)] origin-top-right animate-scale-in overflow-hidden rounded-[20px] border border-line/80 bg-white/95 shadow-float backdrop-blur-xl max-sm:fixed max-sm:inset-x-3 max-sm:top-[4.25rem] max-sm:mt-0 max-sm:w-auto max-sm:max-w-none max-sm:origin-top"
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-line-soft bg-gradient-to-br from-primary-light/45 via-white to-secondary-light/35 px-4 py-3.5">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-primary shadow-sm ring-1 ring-line/70">
+                <Bell className="h-[18px] w-[18px]" strokeWidth={2.1} />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-bold tracking-tight text-ink">Notifications</p>
+                <p className="mt-0.5 text-[11px] font-medium text-ink-muted">
+                  {unreadCount > 0
+                    ? `${unreadCount} unread · ${notifications.length} total`
+                    : 'You are all caught up'}
+                </p>
+              </div>
             </div>
+
             {unreadCount > 0 && (
               <button
                 type="button"
                 onClick={markAllRead}
-                className="flex items-center gap-1 rounded-lg bg-primary-light/60 px-2 py-1 text-[10px] font-semibold text-primary transition hover:bg-primary-light"
+                className="flex shrink-0 items-center gap-1 rounded-lg bg-white/80 px-2.5 py-1.5 text-[10px] font-semibold text-primary shadow-sm ring-1 ring-line/70 transition hover:bg-white hover:ring-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               >
-                <CheckCheck className="h-3 w-3" />
+                <CheckCheck className="h-3.5 w-3.5" />
                 Mark all read
               </button>
             )}
           </div>
 
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-[22rem] overflow-y-auto p-1.5">
             {notifications.length === 0 ? (
               <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-canvas text-ink-muted">
-                  <Bell className="h-5 w-5" />
+                <span className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-light to-secondary-light text-primary">
+                  <span className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/70" />
+                  <Bell className="relative h-5 w-5" />
                 </span>
-                <p className="mt-3 text-xs font-semibold text-ink">No notifications yet</p>
-                <p className="mt-0.5 text-[11px] text-ink-muted">Updates about your reports will appear here.</p>
+                <p className="mt-3 text-[13px] font-semibold text-ink">You're all caught up</p>
+                <p className="mt-1 max-w-[220px] text-[11px] leading-relaxed text-ink-muted">
+                  Updates about your reports will appear here as they happen.
+                </p>
               </div>
             ) : (
-              notifications.map((n) => (
-                <button
-                  type="button"
-                  key={n.notification_id}
-                  onClick={() => markAsRead(n.notification_id)}
-                  className={cn(
-                    'flex w-full flex-col items-start gap-0.5 border-b border-line-soft px-4 py-3 text-left transition last:border-0 hover:bg-canvas/70',
-                    !n.is_read && 'bg-primary-light/25'
-                  )}
-                >
-                  <div className="flex w-full items-center gap-2">
-                    {!n.is_read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
-                    <span className="truncate text-xs font-semibold text-ink">{n.title}</span>
-                  </div>
-                  <p className="line-clamp-2 text-[11px] leading-relaxed text-ink-soft">{n.message}</p>
-                  <span className="mt-0.5 text-[10px] text-ink-muted">{timeAgo(n.sent_at)}</span>
-                </button>
-              ))
+              <div className="space-y-1">
+                {notifications.map((n) => {
+                  const { Icon, wrap } = notificationStyle(n.title)
+                  const opensReport = Boolean(n.report_id)
+
+                  return (
+                    <button
+                      type="button"
+                      key={n.notification_id}
+                      onClick={() => handleNotificationClick(n)}
+                      title={opensReport ? 'Open report' : undefined}
+                      className={cn(
+                        'group flex w-full items-start gap-3 rounded-xl px-2.5 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                        n.is_read ? 'hover:bg-canvas/70' : 'bg-primary-light/30 hover:bg-primary-light/50'
+                      )}
+                    >
+                      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', wrap)}>
+                        <Icon className="h-[17px] w-[17px]" />
+                      </span>
+
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1.5">
+                          <span
+                            className={cn(
+                              'min-w-0 flex-1 truncate text-[12.5px] leading-tight',
+                              n.is_read ? 'font-semibold text-ink' : 'font-bold text-ink'
+                            )}
+                          >
+                            {n.title}
+                          </span>
+                          {!n.is_read && (
+                            <>
+                              <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                              <span className="sr-only">Unread</span>
+                            </>
+                          )}
+                        </span>
+
+                        <span className="mt-1 line-clamp-2 block text-[11.5px] leading-relaxed text-ink-soft">
+                          {n.message}
+                        </span>
+
+                        <span className="mt-1.5 flex items-center gap-1 text-[10px] font-medium text-ink-muted">
+                          <Clock className="h-3 w-3" />
+                          {timeAgo(n.sent_at)}
+                        </span>
+                      </span>
+
+                      {opensReport && (
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="mt-2 h-4 w-4 shrink-0 text-ink-muted opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                        />
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
             )}
           </div>
         </div>

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { MapPin, Calendar, ChevronDown, Trash2, ListChecks, FilePlus, AlertTriangle } from 'lucide-react'
-import { getDisplayPosition, hasVerifiedLocation } from '../lib/reportLocation'
+import { hasVerifiedLocation } from '../lib/reportLocation'
 import { deleteHazardReport } from '../lib/deleteReport'
 import ImageLightbox from '../components/ImageLightbox'
+import ReportLocationMap from '../components/map/ReportLocationMap'
 import toast from 'react-hot-toast'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
@@ -26,12 +27,28 @@ function formatDate(dateString) {
 
 export default function TrackReports() {
   const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const deepLinkId = searchParams.get('report')
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
-  const [expandedId, setExpandedId] = useState(null)
+  // Seed directly from the URL so a notification deep link is expanded on the
+  // very first paint, without waiting for an effect.
+  const [expandedId, setExpandedId] = useState(deepLinkId)
+  const [highlightId, setHighlightId] = useState(deepLinkId)
+  const [pendingDeepLink, setPendingDeepLink] = useState(deepLinkId)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [lightbox, setLightbox] = useState(null) // { images, index } while a photo is open
+
+  // URL → UI sync. React's "adjust state during render" pattern avoids a
+  // cascading setState effect and also handles clicks while already on this page.
+  if (deepLinkId !== pendingDeepLink) {
+    setPendingDeepLink(deepLinkId)
+    if (deepLinkId) {
+      setExpandedId(deepLinkId)
+      setHighlightId(deepLinkId)
+    }
+  }
 
   useEffect(() => {
     if (!user) return
@@ -49,6 +66,34 @@ export default function TrackReports() {
 
     fetchReports()
   }, [user])
+
+  // Once the report list is available, drop ?report= so a refresh or back
+  // navigation doesn't re-trigger the jump. If the id isn't in the citizen's
+  // list (deleted, or not theirs), tell them instead of silently doing nothing.
+  useEffect(() => {
+    if (loading || !pendingDeepLink) return
+
+    setSearchParams({}, { replace: true })
+    if (!reports.some((report) => report.report_id === pendingDeepLink)) {
+      toast.error('That report could not be found.')
+    }
+  }, [loading, pendingDeepLink, reports, setSearchParams])
+
+  // Scroll the highlighted card into view once the list has rendered, then
+  // fade the highlight away.
+  useEffect(() => {
+    if (loading || !highlightId) return
+
+    const scrollTimer = setTimeout(() => {
+      document.getElementById(`report-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 80)
+    const highlightTimer = setTimeout(() => setHighlightId(null), 2600)
+
+    return () => {
+      clearTimeout(scrollTimer)
+      clearTimeout(highlightTimer)
+    }
+  }, [loading, highlightId])
 
   async function handleDelete(report) {
     setDeleting(true)
@@ -102,9 +147,22 @@ export default function TrackReports() {
             const isExpanded = expandedId === report.report_id
             const photos = report.hazard_images ?? []
             const thumbnail = photos[0]?.image_url
+            // The spot the citizen pinned at submission, plus the inspector's
+            // correction when one exists — both are shown so the citizen can
+            // verify exactly what was recorded.
+            const pinnedPosition = [Number(report.latitude), Number(report.longitude)]
+            const verifiedPosition = hasVerifiedLocation(report)
+              ? [Number(report.verified_latitude), Number(report.verified_longitude)]
+              : null
 
             return (
-              <Card key={report.report_id} className="overflow-hidden transition hover:shadow-float">
+              <Card
+                key={report.report_id}
+                id={`report-${report.report_id}`}
+                className={`scroll-mt-24 overflow-hidden transition hover:shadow-float ${
+                  highlightId === report.report_id ? 'ring-2 ring-primary/50' : ''
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => setExpandedId(isExpanded ? null : report.report_id)}
@@ -177,12 +235,54 @@ export default function TrackReports() {
                       </div>
                     )}
 
-                    <div className="mt-3 flex flex-wrap items-center gap-1 text-xs text-ink-soft">
-                      <MapPin className="h-3.5 w-3.5 text-ink-muted" />
-                      {getDisplayPosition(report)[0].toFixed(5)}, {getDisplayPosition(report)[1].toFixed(5)}
-                      {hasVerifiedLocation(report) && (
-                        <span className="font-medium text-success">(corrected by inspector on-site)</span>
+                    <div className="mt-4 rounded-xl border border-line-soft bg-canvas/40 p-3">
+                      <p className="text-[11px] font-bold uppercase tracking-[0.08em] text-ink-muted">
+                        Location you pinned
+                      </p>
+
+                      <div className="mt-2 flex items-start gap-1.5 text-xs text-ink-soft">
+                        <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                        {Number.isFinite(pinnedPosition[0]) && Number.isFinite(pinnedPosition[1]) ? (
+                          <span>
+                            <span className="font-medium text-ink">
+                              {pinnedPosition[0].toFixed(5)}, {pinnedPosition[1].toFixed(5)}
+                            </span>
+                            <span className="text-ink-muted"> · exact spot you selected when submitting</span>
+                          </span>
+                        ) : (
+                          <span className="text-ink-muted">No coordinates were saved with this report.</span>
+                        )}
+                      </div>
+
+                      {verifiedPosition && (
+                        <div className="mt-1.5 flex items-start gap-1.5 text-xs text-success">
+                          <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            <span className="font-medium">
+                              {verifiedPosition[0].toFixed(5)}, {verifiedPosition[1].toFixed(5)}
+                            </span>
+                            <span className="text-ink-soft"> · corrected by an inspector on-site</span>
+                          </span>
+                        </div>
                       )}
+
+                      <div className="mt-3">
+                        <ReportLocationMap position={pinnedPosition} verifiedPosition={verifiedPosition} />
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-muted">
+                        <span className="inline-flex items-center gap-1">
+                          <span className="h-2 w-2 rounded-full bg-primary" />
+                          Your pin
+                        </span>
+                        {verifiedPosition && (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="h-2 w-2 rounded-full bg-success" />
+                            Inspector-verified
+                          </span>
+                        )}
+                        <span>Blue outline = Iligan City coverage</span>
+                      </div>
                     </div>
 
                     {report.status === 'rejected' && report.rejection_reason && (

@@ -109,6 +109,9 @@
   body {
     @apply bg-canvas text-ink font-sans antialiased;
     min-height: 100vh;
+    /* The app shell owns scrolling; stop scroll chaining/rubber-banding from
+       bubbling up to the document. */
+    overscroll-behavior-y: none;
   }
 
   ::selection {

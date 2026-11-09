@@ -8,14 +8,21 @@
 //          'unavailable' the device could not work out where it is (yet)
 //          'unsupported' this browser cannot share a location at all
 // Note: browsers only share a location on https:// pages (and on localhost).
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isInsideBounds } from './geo'
 
 const OPTIONS = { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 }
 
-export function useUserLocation({ bounds } = {}) {
+export function useUserLocation({ bounds, contains } = {}) {
   const [state, setState] = useState({ status: 'locating', position: null })
   const watchId = useRef(null)
+
+  // `contains(lat, lng)` wins when provided; otherwise fall back to the old
+  // rectangular bounds check. Passing a module-level function keeps it stable.
+  const isInside = useMemo(
+    () => contains ?? (bounds ? (lat, lng) => isInsideBounds(lat, lng, bounds) : null),
+    [contains, bounds]
+  )
 
   const stop = useCallback(() => {
     if (watchId.current != null && typeof navigator !== 'undefined' && navigator.geolocation) {
@@ -35,7 +42,7 @@ export function useUserLocation({ bounds } = {}) {
     watchId.current = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude, accuracy } = pos.coords
-        if (bounds && !isInsideBounds(latitude, longitude, bounds)) {
+        if (isInside && !isInside(latitude, longitude)) {
           setState({ status: 'outside', position: null })
         } else {
           setState({ status: 'on', position: { lat: latitude, lng: longitude, accuracy } })
@@ -51,7 +58,7 @@ export function useUserLocation({ bounds } = {}) {
       },
       OPTIONS
     )
-  }, [bounds, stop])
+  }, [isInside, stop])
 
   useEffect(() => {
     start()

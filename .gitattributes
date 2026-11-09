@@ -1,0 +1,10 @@
+# Binary assets must never be treated as text by git.
+# (A text-mode read/write of the model replaced non-UTF-8 bytes with
+# U+FFFD characters and made ONNX Runtime fail with "protobuf parsing failed".)
+*.onnx binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary

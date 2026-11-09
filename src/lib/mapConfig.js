@@ -1,6 +1,8 @@
+import { ILIGAN_BBOX } from './iliganBoundary'
+
 // Shared map configuration — used by every Leaflet map in the app
 // (report submission, hazard map viewing, inspector site maps, etc.)
-// Update these two values here if the study area ever changes.
+// The service area itself lives in ./iliganBoundary.js.
 
 export const CITY_CENTER = [8.228, 124.2452] // Iligan City, Lanao del Norte, PH
 
@@ -47,16 +49,20 @@ export const MAP_LAYERS = MAPTILER_KEY
       },
     ]
 
-// Bounding box around Iligan City — panning outside this is blocked.
-// Widened to cover the full land area, since Iligan stretches well inland
-// into the mountains, not just the coastal downtown area.
+// Panning limit, derived from the actual city outline plus a small margin so
+// the boundary line is never pinned to the edge of the map. The city stretches
+// well inland into the mountains, not just along the coast.
+const BOUNDS_PADDING_DEGREES = 0.02
+const [CITY_WEST, CITY_SOUTH, CITY_EAST, CITY_NORTH] = ILIGAN_BBOX
+
 export const CITY_BOUNDS = [
-  [8.05, 124.05], // southwest corner
-  [8.45, 124.5],  // northeast corner
+  [CITY_SOUTH - BOUNDS_PADDING_DEGREES, CITY_WEST - BOUNDS_PADDING_DEGREES], // southwest corner
+  [CITY_NORTH + BOUNDS_PADDING_DEGREES, CITY_EAST + BOUNDS_PADDING_DEGREES], // northeast corner
 ]
 
 export const CITY_DEFAULT_ZOOM = 13
-export const CITY_MIN_ZOOM = 12
+// Zoomed out far enough to see the whole coverage outline on a desktop map.
+export const CITY_MIN_ZOOM = 11
 
 // Hazard Map: the widest view the map allows, used when the user's location is off or unavailable.
 export const CITY_ZOOM_OUT = CITY_MIN_ZOOM

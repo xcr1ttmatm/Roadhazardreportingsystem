@@ -5,11 +5,12 @@ import { Calendar, LocateFixed, Map as MapIcon, MapPin, ShieldCheck, Wrench } fr
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_ZOOM_OUT, CITY_MIN_ZOOM, USER_FOCUS_ZOOM } from '../lib/mapConfig'
 import { useUserLocation } from '../lib/useUserLocation'
-import { countNearbyHazards } from '../lib/geo'
+import { countNearbyHazards, isInsideIligan } from '../lib/geo'
 import { SEVERITY_COLORS } from '../lib/severity'
 import { getDisplayPosition } from '../lib/reportLocation'
 import ImageLightbox from '../components/ImageLightbox'
 import BaseTiles from '../components/map/BaseTiles'
+import CoverageBoundary from '../components/map/CoverageBoundary'
 import PageHeader from '../components/ui/PageHeader'
 import LoadingState from '../components/ui/LoadingState'
 
@@ -167,7 +168,7 @@ export default function HazardMap() {
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState(null) // { images, index } | null
 
-  const { status: locStatus, position: userPos, retry: retryLocation } = useUserLocation({ bounds: CITY_BOUNDS })
+  const { status: locStatus, position: userPos, retry: retryLocation } = useUserLocation({ contains: isInsideIligan })
   const [centerRequest, setCenterRequest] = useState(0) // each increase flies the map to the user
   const autoCentered = useRef(false)
 
@@ -250,6 +251,8 @@ export default function HazardMap() {
         >
           <BaseTiles />
 
+          <CoverageBoundary />
+
           <UserLocationLayer position={userPos} centerRequest={centerRequest} />
 
           {reports.map((report) => (
@@ -325,6 +328,10 @@ export default function HazardMap() {
             <LegendRow color={SEVERITY_COLORS.moderate} label="Moderate" />
             <LegendRow color={SEVERITY_COLORS.low} label="Low" />
             <LegendRow color={SEVERITY_COLORS.default} label="Unspecified" />
+          </div>
+          <div className="mt-2 flex items-center gap-2 border-t border-line-soft pt-2 text-[11px] font-medium text-ink-soft">
+            <span className="h-0 w-5 border-t-2 border-dashed border-primary" aria-hidden="true" />
+            Iligan City coverage
           </div>
         </div>
       </div>
