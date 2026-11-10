@@ -49,20 +49,24 @@ export default function AuthShell({
 
       <div className="relative mx-auto flex min-h-screen w-full max-w-[1500px] flex-col gap-5 p-4 sm:p-5 lg:flex-row lg:gap-6 lg:p-6">
         {/* Brand panel */}
-        <aside
-          className="relative hidden overflow-hidden rounded-[28px] bg-brand-gradient p-10 text-white shadow-glow-blue lg:flex lg:w-[45%] lg:flex-col lg:justify-between xl:p-12"
-          style={
-            background
-              ? {
-                  backgroundImage: `url("${background}")`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }
-              : undefined
-          }
-        >
+        <aside className="relative hidden overflow-hidden rounded-[28px] bg-brand-gradient p-10 text-white shadow-glow-blue lg:flex lg:w-[45%] lg:flex-col lg:justify-between xl:p-12">
           {background && (
-            <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/85 via-accent/75 to-secondary/85" />
+            <>
+              {/* Blurred copy fills the panel behind the full, uncropped photo. */}
+              <img
+                src={background}
+                alt=""
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover blur-2xl brightness-75"
+              />
+              <img
+                src={background}
+                alt=""
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+              />
+              <span className="pointer-events-none absolute inset-0 bg-gradient-to-br from-primary/55 via-accent/40 to-secondary/55" />
+            </>
           )}
           <span className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full bg-white/10 blur-2xl" />
           <span className="pointer-events-none absolute -bottom-28 -left-20 h-80 w-80 rounded-full bg-white/10 blur-2xl" />

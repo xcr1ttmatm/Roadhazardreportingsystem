@@ -52,5 +52,5 @@ export const branding = {
    * light overlay. Leave empty to keep the gradient-only look.
    * e.g. '/login-bg.jpg'
    */
-  authBackgroundImage: env.VITE_AUTH_BACKGROUND_IMAGE || '/CEOsLogo.png',
+  authBackgroundImage: env.VITE_AUTH_BACKGROUND_IMAGE || '/login-bg.png',
 }
