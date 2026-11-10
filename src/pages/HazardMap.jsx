@@ -7,34 +7,15 @@ import { CITY_CENTER, CITY_BOUNDS, CITY_ZOOM_OUT, CITY_MIN_ZOOM, USER_FOCUS_ZOOM
 import { useUserLocation } from '../lib/useUserLocation'
 import { countNearbyHazards, isInsideIligan } from '../lib/geo'
 import { SEVERITY_COLORS, severityColor, severityLabel } from '../lib/severity'
+import { getBeforeAfterImages } from '../lib/reportImages'
+import { useMediaQuery } from '../lib/useMediaQuery'
 import { getDisplayPosition } from '../lib/reportLocation'
 import ImageLightbox from '../components/ImageLightbox'
+import ReportSheet from '../components/map/ReportSheet'
 import BaseTiles from '../components/map/BaseTiles'
 import CoverageBoundary from '../components/map/CoverageBoundary'
 import PageHeader from '../components/ui/PageHeader'
 import LoadingState from '../components/ui/LoadingState'
-
-// Builds the Before/After photo sets for a report. "Before" leads with
-// whichever photo the admin picked as featured at approval time; "After"
-// comes from resolved_images, falling back to the older single
-// resolved_image_url pointer for reports resolved before that table existed.
-function getBeforeAfterImages(report) {
-  const rawBefore = report.featured_image_url
-    ? [report.featured_image_url, ...(report.hazard_images || []).map((i) => i.image_url).filter((u) => u !== report.featured_image_url)]
-    : (report.hazard_images || []).map((i) => i.image_url)
-
-  const rawAfter =
-    report.resolved_images && report.resolved_images.length > 0
-      ? report.resolved_images.map((i) => i.image_url)
-      : report.resolved_image_url
-        ? [report.resolved_image_url]
-        : []
-
-  return {
-    before: rawBefore.map((url) => ({ url, label: 'Before' })),
-    after: rawAfter.map((url) => ({ url, label: 'After' })),
-  }
-}
 
 // Shows the "After" repair photo by default for resolved hazards, with a
 // toggle to compare against the original "Before" photo. Click the photo
@@ -171,6 +152,8 @@ export default function HazardMap() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState(null) // { images, index } | null
+  const [selectedReport, setSelectedReport] = useState(null) // mobile bottom sheet
+  const isMobile = useMediaQuery('(max-width: 639px), (max-height: 600px)')
 
   const { status: locStatus, position: userPos, retry: retryLocation } = useUserLocation({ contains: isInsideIligan })
   const [centerRequest, setCenterRequest] = useState(0) // each increase flies the map to the user
@@ -259,55 +242,61 @@ export default function HazardMap() {
 
           <UserLocationLayer position={userPos} centerRequest={centerRequest} />
 
+          {/* On a phone the map box is shorter than a report card, so Leaflet
+              clips the popup and the photo becomes unreachable. Mobile markers
+              open the portaled bottom sheet instead; desktop keeps the popup. */}
           {reports.map((report) => (
             <Marker
               key={report.report_id}
               position={getDisplayPosition(report)}
               icon={severityIcon(report.severity, report.status)}
+              eventHandlers={isMobile ? { click: () => setSelectedReport(report) } : undefined}
             >
-              <Popup autoPan autoPanPadding={[20, 72]} keepInView>
-                <div className="w-52">
-                  <PopupImage
-                    report={report}
-                    onOpenLightbox={(images, index) => setLightbox({ images, index })}
-                  />
-                  <p className="text-sm font-semibold text-ink">
-                    {report.title || 'Road hazard'}
-                  </p>
-                  <p className="mt-1 line-clamp-3 text-xs text-ink-soft">{report.description}</p>
-                  {report.status === 'resolved' ? (
-                    <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-semibold text-white">
-                      <Wrench className="h-2.5 w-2.5" />
-                      Resolved
-                    </span>
-                  ) : (
-                    report.severity && (
-                      // Quiet, map-native treatment: the colour survives as a
-                      // small dot, the word stays small and low-contrast so it
-                      // never competes with the hazard title or the photo.
-                      <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-canvas px-2 py-0.5 text-[10px] font-medium text-ink-soft ring-1 ring-line">
-                        <span
-                          className="h-1.5 w-1.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: severityColor(report.severity) }}
-                        />
-                        {severityLabel(report.severity)}
+              {!isMobile && (
+                <Popup autoPan autoPanPadding={[20, 72]} keepInView>
+                  <div className="w-52">
+                    <PopupImage
+                      report={report}
+                      onOpenLightbox={(images, index) => setLightbox({ images, index })}
+                    />
+                    <p className="text-sm font-semibold text-ink">
+                      {report.title || 'Road hazard'}
+                    </p>
+                    <p className="mt-1 line-clamp-3 text-xs text-ink-soft">{report.description}</p>
+                    {report.status === 'resolved' ? (
+                      <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-semibold text-white">
+                        <Wrench className="h-2.5 w-2.5" />
+                        Resolved
                       </span>
-                    )
-                  )}
-                  {report.approved_at && (
-                    <div className="mt-2 flex items-center gap-1 text-[11px] text-ink-muted">
-                      <Calendar className="h-3 w-3" />
-                      Approved {formatDate(report.approved_at)}
-                    </div>
-                  )}
-                  {report.status === 'resolved' && report.resolved_at && (
-                    <div className="mt-1 flex items-center gap-1 text-[11px] text-success">
-                      <Calendar className="h-3 w-3" />
-                      Repaired {formatDate(report.resolved_at)}
-                    </div>
-                  )}
-                </div>
-              </Popup>
+                    ) : (
+                      report.severity && (
+                        // Quiet, map-native treatment: the colour survives as a
+                        // small dot, the word stays small and low-contrast so it
+                        // never competes with the hazard title or the photo.
+                        <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-canvas px-2 py-0.5 text-[10px] font-medium text-ink-soft ring-1 ring-line">
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: severityColor(report.severity) }}
+                          />
+                          {severityLabel(report.severity)}
+                        </span>
+                      )
+                    )}
+                    {report.approved_at && (
+                      <div className="mt-2 flex items-center gap-1 text-[11px] text-ink-muted">
+                        <Calendar className="h-3 w-3" />
+                        Approved {formatDate(report.approved_at)}
+                      </div>
+                    )}
+                    {report.status === 'resolved' && report.resolved_at && (
+                      <div className="mt-1 flex items-center gap-1 text-[11px] text-success">
+                        <Calendar className="h-3 w-3" />
+                        Repaired {formatDate(report.resolved_at)}
+                      </div>
+                    )}
+                  </div>
+                </Popup>
+              )}
             </Marker>
           ))}
         </MapContainer>
@@ -356,6 +345,14 @@ export default function HazardMap() {
             </p>
           </div>
         )
+      )}
+
+      {isMobile && selectedReport && (
+        <ReportSheet
+          report={selectedReport}
+          onClose={() => setSelectedReport(null)}
+          onOpenLightbox={(images, index) => setLightbox({ images, index })}
+        />
       )}
 
       {lightbox && (

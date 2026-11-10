@@ -64,7 +64,7 @@ export default function Modal({ open, onClose, title, description, children, foo
           </div>
         )}
 
-        <div className="max-h-[calc(100vh-12rem)] overflow-y-auto px-5 py-4">{children}</div>
+        <div className="max-h-[calc(100dvh-12rem)] overflow-y-auto px-5 py-4">{children}</div>
 
         {footer && (
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line-soft bg-canvas/50 px-5 py-3.5">
