@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { isInsideIligan } from '../lib/geo'
-import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
+import { SEVERITY_COLORS, severityLabel } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
 import { deleteHazardReport } from '../lib/deleteReport'
 import { runHazardDetection } from '../lib/hazardDetection'
@@ -1223,7 +1223,7 @@ export default function ReportDetail() {
                     className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
                     style={{ backgroundColor: SEVERITY_COLORS[detection.severity_level?.toLowerCase()] || SEVERITY_COLORS.default }}
                   >
-                    {SEVERITY_LABELS[detection.severity_level?.toLowerCase()] || detection.severity_level}
+                    {severityLabel(detection.severity_level)}
                   </span>
                   <Badge tone="neutral">{formatHazardType(detection.hazard_type)}</Badge>
                   <span className="ml-auto text-xs text-ink-muted">

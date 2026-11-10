@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf'
-import { SEVERITY_LABELS } from './severity'
+import { severityLabel } from './severity'
 import { getDisplayPosition, hasVerifiedLocation } from './reportLocation'
 
 const STATUS_LABELS = {
@@ -119,7 +119,7 @@ export async function generateReportPdf(report, detection) {
     sectionHeader('Computer Vision Detection')
     bodyText(
       `Hazard Type: ${formatHazardType(detection.hazard_type)}\n` +
-      `Severity: ${SEVERITY_LABELS[detection.severity_level] || detection.severity_level}\n` +
+      `Severity: ${severityLabel(detection.severity_level)}\n` +
       `Confidence: ${Number(detection.confidence_score).toFixed(0)}%\n` +
       `Notes: ${detection.detection_notes}`
     )

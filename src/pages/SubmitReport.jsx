@@ -8,6 +8,7 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
 import { isInsideIligan } from '../lib/geo'
+import { getCurrentLocation, locationErrorMessage } from '../lib/geolocation'
 import PageHeader from '../components/ui/PageHeader'
 import BaseTiles from '../components/map/BaseTiles'
 import CoverageBoundary from '../components/map/CoverageBoundary'
@@ -100,30 +101,24 @@ export default function SubmitReport() {
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
-  function handleUseCurrentLocation() {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your browser')
+  async function handleUseCurrentLocation() {
+    setLocating(true)
+    const result = await getCurrentLocation()
+    if (!result.ok) {
+      toast.error(locationErrorMessage(result.code))
+      setLocating(false)
       return
     }
-    setLocating(true)
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const next = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        if (!isInsideIligan(next.lat, next.lng)) {
-          // Do not drop a pin outside the coverage area (and do not let the map
-          // fly there) — tell the user why instead.
-          toast.error('You appear to be outside Iligan City. Reports are only accepted within Iligan City.')
-          setLocating(false)
-          return
-        }
-        setPosition(next)
-        setLocating(false)
-      },
-      () => {
-        toast.error('Could not get your location — please pin it on the map instead')
-        setLocating(false)
-      }
-    )
+    const next = { lat: result.lat, lng: result.lng }
+    if (!isInsideIligan(next.lat, next.lng)) {
+      // Do not drop a pin outside the coverage area (and do not let the map
+      // fly there) - tell the user why instead.
+      toast.error('You appear to be outside Iligan City. Reports are only accepted within Iligan City.')
+      setLocating(false)
+      return
+    }
+    setPosition(next)
+    setLocating(false)
   }
 
   async function handleSubmit(e) {

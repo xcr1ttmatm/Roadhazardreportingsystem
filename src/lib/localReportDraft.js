@@ -7,6 +7,8 @@
  * clearly and the admin can regenerate once the service is back.
  */
 
+import { severityLabel } from './severity'
+
 function titleCase(value = '') {
   return String(value)
     .replace(/[_-]+/g, ' ')
@@ -35,7 +37,9 @@ function actionFor(severity) {
 
 export function buildLocalReportDraft({ report, detection } = {}) {
   const hazardType = titleCase(detection?.hazard_type || 'road hazard')
-  const severity = titleCase(detection?.severity_level || report?.severity || 'unassessed')
+  // Keep the raw key for the repair advice, show the friendly label in prose.
+  const severityKey = detection?.severity_level || report?.severity
+  const severity = severityLabel(severityKey)
   const confidence = confidenceText(detection?.confidence_score)
   const notes = detection?.detection_notes?.trim()
   const description = report?.description?.trim() || 'No citizen description was provided.'
@@ -49,13 +53,17 @@ export function buildLocalReportDraft({ report, detection } = {}) {
   return {
     executive_summary:
       `This draft covers a citizen-reported ${hazardType.toLowerCase()} at ${location}. ` +
-      `The computer-vision assessment rated it ${severity.toLowerCase()}${confidence}. ` +
+      (severityKey
+        ? `The computer-vision assessment rated it ${severity.toLowerCase()}${confidence}. `
+        : 'The computer-vision assessment has not rated it yet. ') +
       'The report is awaiting field verification by an LGU inspector.',
     hazard_description: notes ? `${description} Detection notes: ${notes}` : description,
     severity_assessment:
-      `The hazard was classified as ${severity.toLowerCase()}${confidence}. ` +
+      (severityKey
+        ? `The hazard was classified as ${severity.toLowerCase()}${confidence}. `
+        : 'The hazard has not been assigned a severity yet. ') +
       'This rating reflects the visible road damage and must be confirmed on site before repair work is scheduled.',
-    recommended_action: actionFor(severity),
+    recommended_action: actionFor(severityKey),
     generated_by: 'local_fallback',
     generated_at: new Date().toISOString(),
   }

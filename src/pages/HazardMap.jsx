@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_ZOOM_OUT, CITY_MIN_ZOOM, USER_FOCUS_ZOOM } from '../lib/mapConfig'
 import { useUserLocation } from '../lib/useUserLocation'
 import { countNearbyHazards, isInsideIligan } from '../lib/geo'
-import { SEVERITY_COLORS } from '../lib/severity'
+import { SEVERITY_COLORS, severityColor, severityLabel } from '../lib/severity'
 import { getDisplayPosition } from '../lib/reportLocation'
 import ImageLightbox from '../components/ImageLightbox'
 import BaseTiles from '../components/map/BaseTiles'
@@ -149,6 +149,10 @@ function locationMessage(status, nearbyCount) {
       return 'You appear to be outside Iligan City, so your position is not shown on this map.'
     case 'denied':
       return 'Location is off, so you are seeing the whole city. Allow location for this site in your browser settings, then press the locate button.'
+    case 'timeout':
+      return 'We could not get a GPS fix, so you are seeing the whole city. Move somewhere with a clearer view of the sky, then press the locate button.'
+    case 'insecure':
+      return 'Location only works on an https:// address, so you are seeing the whole city.'
     case 'unavailable':
       return 'We could not find your location yet, so you are seeing the whole city. Press the locate button to try again.'
     case 'unsupported':
@@ -261,7 +265,7 @@ export default function HazardMap() {
               position={getDisplayPosition(report)}
               icon={severityIcon(report.severity, report.status)}
             >
-              <Popup>
+              <Popup autoPan autoPanPadding={[20, 72]} keepInView>
                 <div className="w-52">
                   <PopupImage
                     report={report}
@@ -278,13 +282,15 @@ export default function HazardMap() {
                     </span>
                   ) : (
                     report.severity && (
-                      <span
-                        className="mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize text-white"
-                        style={{
-                          backgroundColor: SEVERITY_COLORS[report.severity?.toLowerCase()] || SEVERITY_COLORS.default,
-                        }}
-                      >
-                        {report.severity} severity
+                      // Quiet, map-native treatment: the colour survives as a
+                      // small dot, the word stays small and low-contrast so it
+                      // never competes with the hazard title or the photo.
+                      <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-canvas px-2 py-0.5 text-[10px] font-medium text-ink-soft ring-1 ring-line">
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: severityColor(report.severity) }}
+                        />
+                        {severityLabel(report.severity)}
                       </span>
                     )
                   )}
@@ -324,9 +330,9 @@ export default function HazardMap() {
             Severity
           </p>
           <div className="space-y-1.5">
-            <LegendRow color={SEVERITY_COLORS.severe} label="Severe" />
-            <LegendRow color={SEVERITY_COLORS.moderate} label="Moderate" />
-            <LegendRow color={SEVERITY_COLORS.low} label="Low" />
+            <LegendRow color={SEVERITY_COLORS.severe} label="Danger" />
+            <LegendRow color={SEVERITY_COLORS.moderate} label="Fair" />
+            <LegendRow color={SEVERITY_COLORS.low} label="Good" />
             <LegendRow color={SEVERITY_COLORS.default} label="Unspecified" />
           </div>
           <div className="mt-2 flex items-center gap-2 border-t border-line-soft pt-2 text-[11px] font-medium text-ink-soft">

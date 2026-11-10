@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
-import { SEVERITY_COLORS, SEVERITY_LABELS } from '../lib/severity'
+import { SEVERITY_COLORS, severityLabel } from '../lib/severity'
 import { generateReportPdf } from '../lib/generateReportPdf'
 import { CITY_BOUNDS } from '../lib/mapConfig'
 import { isInsideIligan } from '../lib/geo'
@@ -564,7 +564,7 @@ export default function InspectionDetail() {
                   className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
                   style={{ backgroundColor: SEVERITY_COLORS[detection.severity_level?.toLowerCase()] || SEVERITY_COLORS.default }}
                 >
-                  {SEVERITY_LABELS[detection.severity_level?.toLowerCase()] || detection.severity_level}
+                  {severityLabel(detection.severity_level)}
                 </span>
                 <Badge tone="neutral">{formatHazardType(detection.hazard_type)}</Badge>
               </div>

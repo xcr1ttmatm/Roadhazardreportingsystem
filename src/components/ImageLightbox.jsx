@@ -296,7 +296,22 @@ export default function ImageLightbox({ images, index, onIndexChange, onClose, r
     if (pointers.current.size > 0) return
 
     setDragging(false)
+    const finished = gesture.current
     gesture.current = null
+
+    // Swipe left/right to change photo — only while the photo is not zoomed, so
+    // dragging a zoomed photo still pans it. This is what phone users expect.
+    if (finished?.type === 'drag' && e.type === 'pointerup' && viewRef.current.scale <= 1.01 && total > 1) {
+      const dx = e.clientX - finished.startX
+      const dy = e.clientY - finished.startY
+      if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        if (dx < 0) goNext()
+        else goPrev()
+        movedRef.current = false
+        return
+      }
+    }
+
     const wasTap = !movedRef.current && e.type === 'pointerup'
     if (!wasTap) return
 
@@ -424,15 +439,20 @@ export default function ImageLightbox({ images, index, onIndexChange, onClose, r
               {index + 1} of {total}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-black/35 text-white backdrop-blur transition hover:bg-white/25"
-          >
-            <X className="h-5 w-5" />
-          </button>
         </div>
       </div>
+
+      {/* Close sits outside the fading bar on purpose: it has to stay reachable
+          at all times, and on a phone it is kept inside the safe area. */}
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close photo viewer"
+        data-lightbox-close
+        className="absolute right-4 top-[calc(0.75rem+env(safe-area-inset-top))] z-30 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-black/50 text-white shadow-lg backdrop-blur transition hover:bg-white/25 sm:right-6"
+      >
+        <X className="h-5 w-5" />
+      </button>
 
       {/* Floating bottom bar — navigation and zoom, never a dedicated row */}
       <div

@@ -59,15 +59,16 @@ export function StatusBadge({ status, className, dot = true }) {
 }
 
 const SEVERITY = {
-  severe: { label: 'Severe', tone: 'danger', color: '#dc2626' },
-  moderate: { label: 'Moderate', tone: 'warning', color: '#d97706' },
-  low: { label: 'Low', tone: 'info', color: '#0284c7' },
+  severe: { label: 'Danger', tone: 'danger', color: '#dc2626' },
+  moderate: { label: 'Fair', tone: 'warning', color: '#d97706' },
+  low: { label: 'Good', tone: 'info', color: '#0284c7' },
 }
 
 export function SeverityBadge({ severity, className }) {
   const key = typeof severity === 'string' ? severity.trim().toLowerCase() : ''
-  if (!key) return null
-  const config = SEVERITY[key] ?? { label: key, tone: 'neutral', color: '#94a3b8' }
+  // A report that was never assessed still gets a badge, so a missing severity
+  // is visible at a glance instead of the row quietly looking complete.
+  const config = SEVERITY[key] ?? { label: 'Unspecified', tone: 'neutral', color: '#94a3b8' }
   return (
     <Badge tone={config.tone} dot className={className}>
       {config.label}

@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import {
   Bell, CheckCheck, CheckCircle2, ChevronRight, Clock, Scan, Trash2, UserPlus, XCircle,
 } from 'lucide-react'
@@ -62,39 +63,154 @@ export default function NotificationBell() {
   const { user, profile } = useAuth()
   const navigate = useNavigate()
   const [notifications, setNotifications] = useState([])
+  // Counted on its own so unread items further down the list are still counted.
+  const [unreadCount, setUnreadCount] = useState(0)
   const [open, setOpen] = useState(false)
+  const [filter, setFilter] = useState('all')
   const panelRef = useRef(null)
+  const toastedIds = useRef(new Set()) // a notification only ever pops up once
+  const userId = user?.id
 
-  const unreadCount = notifications.filter((n) => !n.is_read).length
+  const markAsRead = useCallback(async (id) => {
+    setNotifications((prev) => prev.map((n) => (n.notification_id === id ? { ...n, is_read: true } : n)))
+    setUnreadCount((c) => Math.max(0, c - 1))
+    await supabase.from('notifications').update({ is_read: true }).eq('notification_id', id)
+  }, [])
+
+  const openNotification = useCallback(
+    (notification) => {
+      if (!notification.is_read) markAsRead(notification.notification_id)
+      const path = reportPathFor(profile?.user_type, notification.report_id)
+      // A notification without a report ("Report deleted", etc.) is read-only,
+      // so keep the panel open instead of dropping the user somewhere useless.
+      if (!path) return
+      setOpen(false)
+      navigate(path)
+    },
+    [markAsRead, navigate, profile?.user_type]
+  )
+
+  // Facebook-style pop-up: appears wherever the user is, no panel needed.
+  const showNotificationToast = useCallback(
+    (notification) => {
+      if (toastedIds.current.has(notification.notification_id)) return
+      toastedIds.current.add(notification.notification_id)
+
+      const { Icon, wrap } = notificationStyle(notification.title)
+      const path = reportPathFor(profile?.user_type, notification.report_id)
+
+      function handleOpen() {
+        toast.dismiss(notification.notification_id)
+        openNotification(notification)
+      }
+
+      toast.custom(
+        (t) => (
+          <div
+            role={path ? 'button' : undefined}
+            tabIndex={path ? 0 : undefined}
+            onClick={() => {
+              if (!path) {
+                toast.dismiss(t.id)
+                return
+              }
+              handleOpen()
+            }}
+            onKeyDown={(e) => {
+              if (!path) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                handleOpen()
+              }
+            }}
+            className={cn(
+              'pointer-events-auto flex w-[min(88vw,360px)] items-start gap-3 rounded-2xl border border-line bg-white/95 p-3 text-left shadow-float backdrop-blur-xl',
+              path ? 'cursor-pointer transition hover:border-primary/30 hover:bg-white' : 'cursor-default'
+            )}
+          >
+            <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', wrap)}>
+              <Icon className="h-[17px] w-[17px]" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[12.5px] font-bold text-ink">{notification.title}</span>
+              <span className="mt-0.5 line-clamp-2 block text-[11.5px] leading-relaxed text-ink-soft">
+                {notification.message}
+              </span>
+              {path && <span className="mt-1 block text-[10px] font-semibold text-primary">Tap to open</span>}
+            </span>
+          </div>
+        ),
+        {
+          id: notification.notification_id,
+          duration: 6000,
+          // The app-wide Toaster adds a white padded card. Our pop-up is its own
+          // card, so strip the wrapper back to nothing to avoid a double frame.
+          style: { background: 'transparent', border: 'none', boxShadow: 'none', padding: 0, borderRadius: 0, color: 'inherit' },
+        }
+      )
+    },
+    [openNotification, profile?.user_type]
+  )
 
   useEffect(() => {
-    if (!user) return
+    if (!userId) return
 
     async function fetchNotifications() {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('sent_at', { ascending: false })
-        .limit(20)
+      const [list, unread] = await Promise.all([
+        supabase
+          .from('notifications')
+          .select('*')
+          .eq('user_id', userId)
+          .order('sent_at', { ascending: false })
+          .limit(50),
+        supabase
+          .from('notifications')
+          .select('notification_id', { count: 'exact', head: true })
+          .eq('user_id', userId)
+          .eq('is_read', false),
+      ])
 
-      if (!error) setNotifications(data)
+      if (!list.error) setNotifications(list.data)
+      if (typeof unread.count === 'number') setUnreadCount(unread.count)
     }
 
     fetchNotifications()
 
-    // Live updates: new notification arrives without needing a refresh
+    // Live updates: a new notification pops up without needing to open the panel.
     const channel = supabase
-      .channel('notifications-changes')
+      .channel(`notifications-${userId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        (payload) => setNotifications((prev) => [payload.new, ...prev])
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+        ({ new: row }) => {
+          setNotifications((prev) =>
+            prev.some((n) => n.notification_id === row.notification_id) ? prev : [row, ...prev]
+          )
+          if (!row.is_read) setUnreadCount((c) => c + 1)
+          showNotificationToast(row)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+        ({ new: row }) => {
+          // Keeps a second tab / another device in sync.
+          setNotifications((prev) =>
+            prev.map((n) => (n.notification_id === row.notification_id ? { ...n, ...row } : n))
+          )
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+        ({ old: row }) => {
+          setNotifications((prev) => prev.filter((n) => n.notification_id !== row.notification_id))
+        }
       )
       .subscribe()
 
     return () => supabase.removeChannel(channel)
-  }, [user])
+  }, [userId, showNotificationToast])
 
   // Close dropdown when clicking outside it
   useEffect(() => {
@@ -112,27 +228,15 @@ export default function NotificationBell() {
     }
   }, [])
 
-  async function markAsRead(id) {
-    setNotifications((prev) => prev.map((n) => (n.notification_id === id ? { ...n, is_read: true } : n)))
-    await supabase.from('notifications').update({ is_read: true }).eq('notification_id', id)
-  }
-
-  // Clicking a notification marks it read (optimistically, so the badge updates
-  // instantly) and opens the related report. Notifications without a report_id
-  // — e.g. "Report Deleted" — are read-only, so they just mark as read.
-  function handleNotificationClick(notification) {
-    if (!notification.is_read) markAsRead(notification.notification_id)
-    setOpen(false)
-    const path = reportPathFor(profile?.user_type, notification.report_id)
-    if (path) navigate(path)
-  }
-
   async function markAllRead() {
-    const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.notification_id)
-    if (unreadIds.length === 0) return
+    if (unreadCount === 0) return
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
-    await supabase.from('notifications').update({ is_read: true }).in('notification_id', unreadIds)
+    setUnreadCount(0)
+    await supabase.from('notifications').update({ is_read: true }).eq('user_id', userId).eq('is_read', false)
   }
+
+  // Opening the panel never marks anything read: only pressing an item does.
+  const visible = filter === 'unread' ? notifications.filter((n) => !n.is_read) : notifications
 
   return (
     <div className="relative" ref={panelRef}>
@@ -191,21 +295,55 @@ export default function NotificationBell() {
             )}
           </div>
 
+          {/* All / Unread. The unread number is live, so it drops as items are read. */}
+          <div className="flex items-center gap-1.5 border-b border-line-soft px-3 py-2">
+            <button
+              type="button"
+              onClick={() => setFilter('all')}
+              aria-pressed={filter === 'all'}
+              className={cn(
+                'rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                filter === 'all' ? 'bg-primary text-white shadow-sm' : 'text-ink-soft hover:bg-canvas'
+              )}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilter('unread')}
+              aria-pressed={filter === 'unread'}
+              className={cn(
+                'rounded-full px-2.5 py-1 text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                filter === 'unread' ? 'bg-primary text-white shadow-sm' : 'text-ink-soft hover:bg-canvas'
+              )}
+            >
+              Unread ({unreadCount})
+            </button>
+          </div>
+
           <div className="max-h-[22rem] overflow-y-auto p-1.5">
-            {notifications.length === 0 ? (
+            {visible.length === 0 ? (
               <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
                 <span className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-light to-secondary-light text-primary">
                   <span className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/70" />
-                  <Bell className="relative h-5 w-5" />
+                  {notifications.length === 0 ? (
+                    <Bell className="relative h-5 w-5" />
+                  ) : (
+                    <CheckCircle2 className="relative h-5 w-5" />
+                  )}
                 </span>
-                <p className="mt-3 text-[13px] font-semibold text-ink">You're all caught up</p>
+                <p className="mt-3 text-[13px] font-semibold text-ink">
+                  {notifications.length === 0 ? "You're all caught up" : 'No unread notifications'}
+                </p>
                 <p className="mt-1 max-w-[220px] text-[11px] leading-relaxed text-ink-muted">
-                  Updates about your reports will appear here as they happen.
+                  {notifications.length === 0
+                    ? 'Updates about your reports will appear here as they happen.'
+                    : 'Everything has been read. Switch to All to see older updates.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-1">
-                {notifications.map((n) => {
+                {visible.map((n) => {
                   const { Icon, wrap } = notificationStyle(n.title)
                   const opensReport = Boolean(n.report_id)
 
@@ -213,7 +351,7 @@ export default function NotificationBell() {
                     <button
                       type="button"
                       key={n.notification_id}
-                      onClick={() => handleNotificationClick(n)}
+                      onClick={() => openNotification(n)}
                       title={opensReport ? 'Open report' : undefined}
                       className={cn(
                         'group flex w-full items-start gap-3 rounded-xl px-2.5 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
