@@ -120,24 +120,43 @@ function UserLocationLayer({ position, centerRequest }) {
   )
 }
 
-function locationMessage(status, nearbyCount) {
+// GPS accuracy in metres, shortened so it reads well on a phone.
+function formatAccuracy(accuracy) {
+  if (!Number.isFinite(accuracy)) return null
+  if (accuracy >= 1000) return `±${(accuracy / 1000).toFixed(1)} km`
+  return `±${Math.max(1, Math.round(accuracy))} m`
+}
+
+function locationMessage(status, nearbyCount, accuracy, slow) {
   switch (status) {
-    case 'on':
-      return nearbyCount === 0
-        ? 'Your location is on. No active hazards within 1 km of you.'
-        : `Your location is on. ${nearbyCount} active hazard${nearbyCount === 1 ? '' : 's'} within 1 km of you.`
+    case 'on': {
+      const near =
+        nearbyCount === 0
+          ? 'No active hazards within 1 km of you.'
+          : `${nearbyCount} active hazard${nearbyCount === 1 ? '' : 's'} within 1 km of you.`
+      const quality = formatAccuracy(accuracy)
+      return `Your location is on${quality ? ` (${quality})` : ''}. ${near}`
+    }
+    case 'idle':
+      return 'Location is off, so you are seeing the whole city. Tap Enable location and choose Allow when your browser asks.'
+    case 'dismissed':
+      return 'The location prompt was closed without a choice. Tap Enable location and choose Allow to see hazards near you.'
     case 'outside':
       return 'You appear to be outside Iligan City, so your position is not shown on this map.'
     case 'denied':
-      return 'Location is off, so you are seeing the whole city. Allow location for this site in your browser settings, then press the locate button.'
+      return 'Location is blocked for this site, so you are seeing the whole city. Tap the icon beside the address bar, open Permissions, set Location to Allow, then reload the page and press Try again.'
     case 'timeout':
-      return 'We could not get a GPS fix, so you are seeing the whole city. Move somewhere with a clearer view of the sky, then press the locate button.'
+      return 'We could not get a GPS fix, so you are seeing the whole city. Move somewhere with a clearer view of the sky, then press Try again.'
     case 'insecure':
       return 'Location only works on an https:// address, so you are seeing the whole city.'
     case 'unavailable':
-      return 'We could not find your location yet, so you are seeing the whole city. Press the locate button to try again.'
+      return 'We could not find your location yet, so you are seeing the whole city. Press Try again.'
     case 'unsupported':
       return 'This browser cannot share your location, so you are seeing the whole city.'
+    case 'locating':
+      return slow
+        ? 'Still looking for your location. If no permission prompt appeared, tap the icon beside the address bar, allow Location, then press Try again.'
+        : 'Finding your location...'
     default:
       return 'Finding your location...'
   }
@@ -155,7 +174,13 @@ export default function HazardMap() {
   const [selectedReport, setSelectedReport] = useState(null) // mobile bottom sheet
   const isMobile = useMediaQuery('(max-width: 639px), (max-height: 600px)')
 
-  const { status: locStatus, position: userPos, retry: retryLocation } = useUserLocation({ contains: isInsideIligan })
+  const {
+    status: locStatus,
+    position: userPos,
+    accuracy: locAccuracy,
+    slow: locSlow,
+    retry: retryLocation,
+  } = useUserLocation({ contains: isInsideIligan })
   const [centerRequest, setCenterRequest] = useState(0) // each increase flies the map to the user
   const autoCentered = useRef(false)
 
@@ -179,6 +204,14 @@ export default function HazardMap() {
   const activeCount = reports.filter((r) => r.status === 'approved').length // repaired ones are no longer active
   const resolvedCount = reports.filter((r) => r.status === 'resolved').length
   const nearbyCount = countNearbyHazards(userPos, reports)
+  // States where asking again is useful. 'denied' needs the browser setting
+  // changed first, but re-checking costs nothing and picks up the change.
+  const canAskAgain =
+    locStatus === 'idle' ||
+    locStatus === 'dismissed' ||
+    locStatus === 'denied' ||
+    locStatus === 'timeout' ||
+    locStatus === 'unavailable'
 
   useEffect(() => {
     async function fetchApprovedReports() {
@@ -223,8 +256,28 @@ export default function HazardMap() {
         data-testid="location-status"
         className="flex items-start gap-2 rounded-2xl border border-line bg-white px-3.5 py-2.5 text-xs shadow-soft"
       >
-        <LocateFixed className={`mt-0.5 h-4 w-4 shrink-0 ${locStatus === 'on' ? 'text-info' : 'text-ink-muted'}`} />
-        <span className="leading-relaxed text-ink-soft">{locationMessage(locStatus, nearbyCount)}</span>
+        <LocateFixed
+          className={`mt-0.5 h-4 w-4 shrink-0 ${
+            locStatus === 'on'
+              ? 'text-info'
+              : locStatus === 'locating' && locSlow
+                ? 'animate-pulse text-warning'
+                : 'text-ink-muted'
+          }`}
+        />
+        <div className="min-w-0 flex-1 space-y-2">
+          <p className="leading-relaxed text-ink-soft">{locationMessage(locStatus, nearbyCount, locAccuracy, locSlow)}</p>
+          {canAskAgain && (
+            <button
+              type="button"
+              onClick={handleLocateClick}
+              className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-semibold text-white shadow-soft transition hover:bg-primary-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <LocateFixed className="h-3.5 w-3.5" />
+              {locStatus === 'idle' || locStatus === 'dismissed' ? 'Enable location' : 'Try again'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="relative h-[55vh] min-h-[340px] overflow-hidden rounded-2xl border border-line shadow-float sm:h-[65vh] sm:min-h-[420px] lg:h-[75vh]">

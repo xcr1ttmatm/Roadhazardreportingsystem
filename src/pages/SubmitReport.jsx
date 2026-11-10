@@ -8,7 +8,7 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
 import { isInsideIligan } from '../lib/geo'
-import { getCurrentLocation, locationErrorMessage } from '../lib/geolocation'
+import { getCurrentLocation, getLocationPermission, locationErrorMessage } from '../lib/geolocation'
 import PageHeader from '../components/ui/PageHeader'
 import BaseTiles from '../components/map/BaseTiles'
 import CoverageBoundary from '../components/map/CoverageBoundary'
@@ -105,20 +105,28 @@ export default function SubmitReport() {
     setLocating(true)
     const result = await getCurrentLocation()
     if (!result.ok) {
-      toast.error(locationErrorMessage(result.code))
+      // Closing the prompt reports "denied" even though nothing is blocked yet.
+      const permission = result.code === 'denied' ? await getLocationPermission() : null
+      if (permission === 'prompt') {
+        toast.error('The location prompt was closed. Tap "Use my location" again and choose Allow.')
+      } else {
+        toast.error(locationErrorMessage(result.code))
+      }
       setLocating(false)
       return
     }
     const next = { lat: result.lat, lng: result.lng }
-    if (!isInsideIligan(next.lat, next.lng)) {
-      // Do not drop a pin outside the coverage area (and do not let the map
-      // fly there) - tell the user why instead.
-      toast.error('You appear to be outside Iligan City. Reports are only accepted within Iligan City.')
-      setLocating(false)
-      return
-    }
+    // Always drop the pin, even when the fix lands just outside the boundary -
+    // phone GPS can be off by a few hundred metres near the city edge, and
+    // refusing outright leaves the user stuck. The map shows the red "outside
+    // Iligan" warning and submission stays blocked until the pin is moved in.
     setPosition(next)
     setLocating(false)
+    if (!isInsideIligan(next.lat, next.lng)) {
+      toast.error(
+        'Your location appears to be outside Iligan City. Drag the pin inside the blue boundary - reports are only accepted within Iligan City.'
+      )
+    }
   }
 
   async function handleSubmit(e) {
