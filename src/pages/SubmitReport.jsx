@@ -15,6 +15,7 @@ import CoverageBoundary from '../components/map/CoverageBoundary'
 import Card, { CardHeader } from '../components/ui/Card'
 import { Field, Textarea } from '../components/ui/Field'
 import Button from '../components/ui/Button'
+import Modal from '../components/ui/Modal'
 import HazardTypePicker from '../components/HazardTypePicker'
 
 // Fix Leaflet's default marker icon, which breaks under Vite's bundling by default
@@ -68,6 +69,7 @@ export default function SubmitReport() {
   const [position, setPosition] = useState(null)
   const [locating, setLocating] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   // True when the current pin is outside the Iligan City service area. Kept
   // derived (not separate state) so the map, message and button can never drift.
@@ -129,7 +131,10 @@ export default function SubmitReport() {
     }
   }
 
-  async function handleSubmit(e) {
+  // Validates the form, then asks for confirmation. Nothing is written to
+  // Supabase until the citizen confirms, so a stray Enter press or an accidental
+  // tap on Submit can no longer create a report.
+  function handleSubmit(e) {
     e.preventDefault()
 
     if (!title) return toast.error('Please select what you are reporting')
@@ -139,6 +144,24 @@ export default function SubmitReport() {
       return toast.error('Reports are only accepted for locations within Iligan City. Move the pin inside the blue boundary.')
     }
     if (imageFiles.length === 0) return toast.error('Please upload at least one photo of the hazard')
+
+    setConfirmOpen(true)
+  }
+
+  // Escape / backdrop / "Go back and edit" all land here. Ignored while the
+  // upload is in flight so the dialog cannot hide an active submission.
+  function closeConfirm() {
+    if (!submitting) setConfirmOpen(false)
+  }
+
+  async function confirmSubmit() {
+    if (submitting) return
+    // The pin cannot move behind the dialog, but never let an out-of-city point
+    // through if this is ever called from somewhere else.
+    if (!position || !isInsideIligan(position.lat, position.lng)) {
+      setConfirmOpen(false)
+      return toast.error('Reports are only accepted for locations within Iligan City. Move the pin inside the blue boundary.')
+    }
 
     setSubmitting(true)
 
@@ -181,12 +204,15 @@ export default function SubmitReport() {
       if (imageError) throw imageError
 
       toast.success('Hazard report submitted! An LGU admin will review it.')
+      setConfirmOpen(false)
       // Open the new report in "My Reports" so the citizen can review the exact
       // location they pinned before leaving the flow.
       navigate(`/citizen/reports?report=${report.report_id}`)
     } catch (err) {
       console.error(err)
       toast.error(err.message || 'Something went wrong submitting your report')
+      // Let the citizen fix the problem and try again; the form is untouched.
+      setConfirmOpen(false)
     } finally {
       setSubmitting(false)
     }
@@ -370,6 +396,74 @@ export default function SubmitReport() {
           </Card>
         </div>
       </form>
+
+      <Modal
+        open={confirmOpen}
+        onClose={closeConfirm}
+        title="Submit this hazard report?"
+        description="It will be queued for LGU review. You can still delete it later from My Reports."
+        footer={
+          <>
+            {/* Focus lands on the cancel action, not Confirm. The citizen just
+                pressed Enter on the form; a focused confirm button would submit
+                on the very next keypress, which is the accident we are avoiding. */}
+            <Button variant="secondary" onClick={closeConfirm} disabled={submitting} autoFocus>
+              Go back and edit
+            </Button>
+            <Button variant="gradient" onClick={confirmSubmit} loading={submitting} iconRight={Send}>
+              {submitting ? 'Submitting…' : 'Confirm & Submit'}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-line bg-canvas/60 p-3.5">
+            <p className="text-sm font-semibold text-ink">{title || 'Road hazard'}</p>
+            <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-ink-soft">{description.trim()}</p>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="flex items-start gap-2.5 rounded-xl bg-canvas/70 p-3">
+              {imagePreviews[0] ? (
+                <img
+                  src={imagePreviews[0]}
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-line"
+                />
+              ) : (
+                <Camera className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              )}
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-ink">
+                  {imageFiles.length} photo{imageFiles.length === 1 ? '' : 's'}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
+                  The first photo is used for AI detection.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 rounded-xl bg-canvas/70 p-3">
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-ink">
+                  {position ? `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}` : 'No pin set'}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
+                  {outsideCity ? 'Outside Iligan City.' : 'Within Iligan City.'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-2.5 rounded-xl bg-primary-light/40 p-3">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <p className="text-[11px] leading-relaxed text-ink-soft">
+              Reports are reviewed by an LGU admin before they appear on the public map.
+            </p>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }
