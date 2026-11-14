@@ -10,7 +10,13 @@
 // ----------------------------------------------------------------------------
 // Settings you may want to tune
 // ----------------------------------------------------------------------------
-export const MODEL_URL = '/models/hazard_yolov8.onnx'
+// Bump the ?v= number whenever the .onnx file changes. vercel.json caches
+// /models/* for 24 hours, so without this returning admins keep the old weights.
+export const MODEL_URL = '/models/hazard_yolov8.onnx?v=2'
+
+// Anything smaller than this cannot be a real model; an SPA fallback (HTML) or a
+// truncated download lands here instead of failing deep inside ONNX Runtime.
+const MODEL_MIN_BYTES = 1_000_000
 
 // Must match the pinned <script> tag in index.html.
 export const ORT_VERSION = '1.29.0'
@@ -219,7 +225,22 @@ export function loadSession(ort = globalThis.ort) {
   }
   if (!sessionPromise) {
     ort.env.wasm.wasmPaths = ORT_WASM_BASE
-    sessionPromise = ort.InferenceSession.create(MODEL_URL, { executionProviders: ['wasm'] }).catch((err) => {
+    sessionPromise = (async () => {
+      // Fetch the model ourselves so a missing file or an HTML fallback page
+      // produces a clear message instead of ONNX Runtime's "protobuf parsing
+      // failed". ONNX ModelProto always starts with 0x08 (ir_version tag).
+      const res = await fetch(MODEL_URL)
+      if (!res.ok) throw new Error(`Hazard model could not be downloaded (HTTP ${res.status}).`)
+      const buffer = await res.arrayBuffer()
+      if (buffer.byteLength < MODEL_MIN_BYTES) {
+        throw new Error('Hazard model file is missing or truncated. Re-export and redeploy the ONNX model.')
+      }
+      const head = new Uint8Array(buffer, 0, 2)
+      if (head[0] !== 0x08) {
+        throw new Error('Hazard model file is not a valid ONNX model (wrong file or corrupted copy).')
+      }
+      return ort.InferenceSession.create(buffer, { executionProviders: ['wasm'] })
+    })().catch((err) => {
       sessionPromise = null // let a later click try again
       throw err
     })
