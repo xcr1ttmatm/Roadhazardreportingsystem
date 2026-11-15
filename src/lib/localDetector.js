@@ -38,6 +38,12 @@ export const MIN_CONFIDENCE = { Pothole: 0.4, Crack: 0.4, Debris: 0.55, Scouring
 // Severity is a transparent rule, not a second AI: how much of the photo the hazard covers.
 export const SEVERITY_COVERAGE = { moderate: 0.05, severe: 0.2 }
 
+// The model was trained on close-ups where the hazard fills the frame. A hazard that is only a
+// few percent of a phone photo is invisible at 640 px, so when the whole photo yields nothing
+// trustworthy we run the model again on overlapping crops of this size (fraction of each axis).
+// Only the fallback path pays this cost; photos that already work still take one run.
+export const TILE_FRACTION = 0.6
+
 // ----------------------------------------------------------------------------
 // Pure functions
 // ----------------------------------------------------------------------------
@@ -54,6 +60,27 @@ export function computeLetterbox(srcW, srcH, size = INPUT_SIZE) {
     padX: Math.floor((size - newW) / 2),
     padY: Math.floor((size - newH) / 2),
   }
+}
+
+/**
+ * The overlapping crops used when the whole photo is not enough, in the photo's own pixel
+ * coordinates. Two positions per axis (start and end) at TILE_FRACTION of the size, which
+ * gives a 20% overlap across the middle so a hazard on the seam is still wholly inside a tile.
+ */
+export function tileRegions(srcW, srcH, fraction = TILE_FRACTION) {
+  const width = Math.max(2, Math.min(srcW, Math.round(srcW * fraction)))
+  const height = Math.max(2, Math.min(srcH, Math.round(srcH * fraction)))
+  const xs = [...new Set([0, Math.max(0, srcW - width)])]
+  const ys = [...new Set([0, Math.max(0, srcH - height)])]
+  const regions = []
+  for (const y of ys) for (const x of xs) regions.push({ x, y, width, height })
+  return regions
+}
+
+/** Moves boxes from a crop's coordinates back into the whole photo's coordinates. */
+export function offsetDetections(dets, dx, dy) {
+  if (!dx && !dy) return dets
+  return dets.map((d) => ({ ...d, x1: d.x1 + dx, y1: d.y1 + dy, x2: d.x2 + dx, y2: d.y2 + dy }))
 }
 
 /** Canvas pixels (RGBA bytes) -> the model's input layout (RGB, 0..1, channels first). */
@@ -142,6 +169,39 @@ export function decodeOutput(data, dims, lb, srcW, srcH, confThreshold = DECODE_
 }
 
 /**
+ * The highest raw score the model produced for each class, ignoring the decode floor.
+ * Dev-only diagnostic: when `trained model saw: []` appears, this shows how close the
+ * photo actually came, so "the gate is too strict" can be told apart from "the model
+ * genuinely cannot see it". Returns percentages (one decimal) keyed by class name.
+ */
+export function topScoresPerClass(data, dims) {
+  if (dims.length !== 3 || dims[0] !== 1) return null
+  const expectedC = 4 + CLASS_NAMES.length
+  let channelsFirst
+  if (dims[1] === expectedC && dims[2] !== expectedC) channelsFirst = true
+  else if (dims[2] === expectedC && dims[1] !== expectedC) channelsFirst = false
+  else channelsFirst = dims[1] < dims[2]
+  const C = channelsFirst ? dims[1] : dims[2]
+  const N = channelsFirst ? dims[2] : dims[1]
+  const nc = C - 4
+  if (nc !== CLASS_NAMES.length) return null
+  const at = (c, i) => (channelsFirst ? data[c * N + i] : data[i * C + c])
+
+  const best = CLASS_NAMES.map(() => 0)
+  for (let i = 0; i < N; i++) {
+    for (let k = 0; k < nc; k++) {
+      const s = at(4 + k, i)
+      if (s > best[k]) best[k] = s
+    }
+  }
+  const out = {}
+  CLASS_NAMES.forEach((name, k) => {
+    out[name] = Math.round(best[k] * 1000) / 10
+  })
+  return out
+}
+
+/**
  * Decides what the app records. Returns null when nothing is confident enough
  * (the caller then falls back to Gemini).
  */
@@ -205,11 +265,21 @@ export function toStoredDetections(dets, srcW, srcH) {
 }
 
 /** Runs the model on an already-letterboxed 640x640 RGBA image. `ort` is onnxruntime-web. */
-export async function runModel(ort, session, letterboxedRgba, srcW, srcH) {
+export async function runModel(ort, session, letterboxedRgba, srcW, srcH, tag = '') {
   const lb = computeLetterbox(srcW, srcH)
   const tensor = new ort.Tensor('float32', rgbaToChw(letterboxedRgba), [1, 3, INPUT_SIZE, INPUT_SIZE])
   const outputs = await session.run({ [session.inputNames[0]]: tensor })
   const out = outputs[session.outputNames[0]]
+  // Dev-only: print what the model actually saw, even when nothing clears the floor.
+  // No effect on the result; stripped from production builds by the DEV guard.
+  if (import.meta.env.DEV) {
+    const scores = topScoresPerClass(out.data, out.dims)
+    if (scores) {
+      const text = CLASS_NAMES.map((n) => `${n} ${scores[n].toFixed(1)}%`).join(' | ')
+      const where = tag ? ` (${tag})` : ''
+      console.log(`[hazard-detection] raw top score per class${where}: ${text} (decode floor ${DECODE_CONF * 100}%)`)
+    }
+  }
   return nms(decodeOutput(out.data, out.dims, lb, srcW, srcH))
 }
 
@@ -248,6 +318,14 @@ export function loadSession(ort = globalThis.ort) {
   return sessionPromise
 }
 
+/** Paints a rectangular region of the photo into the 640x640 model input, undistorted. */
+function drawLetterboxed(ctx, bitmap, region) {
+  const lb = computeLetterbox(region.width, region.height)
+  ctx.fillStyle = 'rgb(114,114,114)' // the grey padding YOLO was trained with
+  ctx.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE)
+  ctx.drawImage(bitmap, region.x, region.y, region.width, region.height, lb.padX, lb.padY, lb.newW, lb.newH)
+}
+
 /** Downloads a photo, runs the trained model on it, and returns detections + a summary. */
 export async function detectInBrowser(imageUrl, ort = globalThis.ort) {
   const session = await loadSession(ort)
@@ -258,17 +336,40 @@ export async function detectInBrowser(imageUrl, ort = globalThis.ort) {
   const srcW = bitmap.width
   const srcH = bitmap.height
 
-  const lb = computeLetterbox(srcW, srcH)
   const canvas = document.createElement('canvas')
   canvas.width = INPUT_SIZE
   canvas.height = INPUT_SIZE
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  ctx.fillStyle = 'rgb(114,114,114)' // the grey padding YOLO was trained with
-  ctx.fillRect(0, 0, INPUT_SIZE, INPUT_SIZE)
-  ctx.drawImage(bitmap, lb.padX, lb.padY, lb.newW, lb.newH)
+  const readInput = () => ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data
+
+  // 1. The whole photo: cheapest, and enough whenever the hazard is large in the frame.
+  drawLetterboxed(ctx, bitmap, { x: 0, y: 0, width: srcW, height: srcH })
+  const wholeFrame = await runModel(ort, session, readInput(), srcW, srcH, 'whole photo')
+
+  let detections = wholeFrame
+  let tiled = false
+  let summary = summarizeDetections(wholeFrame, srcW, srcH)
+
+  // 2. Nothing trustworthy? The model probably cannot see a hazard that is small in the frame.
+  //    Look at overlapping crops instead, then merge everything back into whole-photo boxes.
+  if (!summary) {
+    const found = []
+    for (const region of tileRegions(srcW, srcH)) {
+      drawLetterboxed(ctx, bitmap, region)
+      const part = await runModel(ort, session, readInput(), region.width, region.height, `crop ${region.x},${region.y}`)
+      found.push(...offsetDetections(part, region.x, region.y))
+    }
+    detections = nms([...wholeFrame, ...found])
+    summary = summarizeDetections(detections, srcW, srcH)
+    tiled = true
+  }
+
   if (bitmap.close) bitmap.close()
 
-  const rgba = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data
-  const detections = await runModel(ort, session, rgba, srcW, srcH)
-  return { detections, summary: summarizeDetections(detections, srcW, srcH), imageSize: { width: srcW, height: srcH } }
+  if (summary && tiled) {
+    summary.notes +=
+      ' The hazard was small in the original frame, so it was located by running the model on zoomed regions of the photo.'
+  }
+
+  return { detections, summary, imageSize: { width: srcW, height: srcH }, tiled }
 }
