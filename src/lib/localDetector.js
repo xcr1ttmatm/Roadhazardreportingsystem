@@ -12,7 +12,7 @@
 // ----------------------------------------------------------------------------
 // Bump the ?v= number whenever the .onnx file changes. vercel.json caches
 // /models/* for 24 hours, so without this returning admins keep the old weights.
-export const MODEL_URL = '/models/hazard_yolov8.onnx?v=2'
+export const MODEL_URL = '/models/hazard_yolov8.onnx?v=3'
 
 // Anything smaller than this cannot be a real model; an SPA fallback (HTML) or a
 // truncated download lands here instead of failing deep inside ONNX Runtime.
