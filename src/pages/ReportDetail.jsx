@@ -143,7 +143,9 @@ export default function ReportDetail() {
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(null)
-  const [showWeakBoxes, setShowWeakBoxes] = useState(false)
+  // null = follow the automatic default (weak guesses show only when nothing is trusted);
+  // a real true/false means the admin has used the switch and that choice wins.
+  const [showWeakBoxes, setShowWeakBoxes] = useState(null)
 
   async function fetchReport() {
     const { data, error } = await supabase

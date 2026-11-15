@@ -16,10 +16,14 @@ const FALLBACK_COLOR = '#374151'
 
 const pct = (fraction) => `${Math.round(fraction * 100000) / 1000}%`
 
-/** Weak guesses show when asked for, or automatically when there is nothing else to show. */
+/**
+ * Weak guesses follow the user's switch when they have set one (`true`/`false`). Before that
+ * (`null`/`undefined`) they show only automatically, when there is nothing else to show.
+ */
 export function effectiveShowWeak(detections, showWeak) {
+  if (typeof showWeak === 'boolean') return showWeak
   const list = Array.isArray(detections) ? detections : []
-  return Boolean(showWeak) || (list.length > 0 && !list.some((d) => d.trusted))
+  return list.length > 0 && !list.some((d) => d.trusted)
 }
 
 /**
@@ -97,17 +101,17 @@ export function DetectionPreview({ detection, imageUrl, showWeak, onShowWeakChan
         ))}
       </div>
 
-      {weakOnly ? (
+      {weakOnly && (
         <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
-          The trained model only made weak guesses for this photo, so its result was not used. The dashed boxes show what it saw.
+          The trained model only made weak guesses for this photo, so its result was not used.
         </p>
-      ) : (
-        weak.length > 0 && (
-          <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-xs text-ink-soft">
-            <input type="checkbox" checked={Boolean(showWeak)} onChange={(e) => onShowWeakChange?.(e.target.checked)} />
-            Also show {weak.length} weaker guess{weak.length === 1 ? '' : 'es'} (dashed)
-          </label>
-        )
+      )}
+
+      {weak.length > 0 && (
+        <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-xs text-ink-soft">
+          <input type="checkbox" checked={weakVisible} onChange={(e) => onShowWeakChange?.(e.target.checked)} />
+          Show {weak.length} weaker guess{weak.length === 1 ? '' : 'es'} (dashed)
+        </label>
       )}
 
       <p className="mt-1 text-[11px] text-ink-muted">
