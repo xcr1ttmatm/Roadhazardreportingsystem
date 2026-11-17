@@ -6,32 +6,19 @@
 // Solid box  = the model was confident enough for the app to trust it.
 // Dashed box = a weaker guess. Kept so you can see what the model thought, but not used for the result.
 
-export const BOX_COLORS = {
-  Pothole: '#CE1126',
-  Crack: '#D97706',
-  Debris: '#2563EB',
-  Scouring: '#9333EA',
-}
+import { BOX_COLORS, effectiveShowWeak, normalizeDetections } from '../lib/detectionResult'
+
 const FALLBACK_COLOR = '#374151'
 
 const pct = (fraction) => `${Math.round(fraction * 100000) / 1000}%`
-
-/**
- * Weak guesses follow the user's switch when they have set one (`true`/`false`). Before that
- * (`null`/`undefined`) they show only automatically, when there is nothing else to show.
- */
-export function effectiveShowWeak(detections, showWeak) {
-  if (typeof showWeak === 'boolean') return showWeak
-  const list = Array.isArray(detections) ? detections : []
-  return list.length > 0 && !list.some((d) => d.trusted)
-}
 
 /**
  * The boxes themselves. Must sit inside an element that is exactly the size of the photo
  * (position: relative), because every box is positioned in percentages of that element.
  */
 export default function DetectionBoxes({ detections, showWeak = false }) {
-  const shown = (Array.isArray(detections) ? detections : []).filter((d) => d.trusted || showWeak)
+  const { boxes } = normalizeDetections(detections)
+  const shown = boxes.filter((d) => d.trusted || showWeak)
   return (
     <>
       {shown.map((d, i) => {
@@ -71,8 +58,8 @@ export default function DetectionBoxes({ detections, showWeak = false }) {
  * weaker guesses. Controlled: the parent owns `showWeak` so the full-screen viewer can match it.
  */
 export function DetectionPreview({ detection, imageUrl, showWeak, onShowWeakChange, onOpen }) {
-  const all = detection?.detections
-  if (!imageUrl || !Array.isArray(all) || all.length === 0) return null
+  const { boxes: all } = normalizeDetections(detection?.detections)
+  if (!imageUrl || all.length === 0) return null
 
   const weak = all.filter((d) => !d.trusted)
   const weakOnly = !all.some((d) => d.trusted)

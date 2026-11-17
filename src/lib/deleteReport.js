@@ -28,8 +28,14 @@ export async function deleteHazardReport(report, options = {}) {
     .map((img) => extractStoragePath(img.image_url, 'hazard-images'))
     .filter(Boolean)
 
+  // The annotated photo made at submission has no hazard_images row, so its
+  // path is derived from the report id and cleaned up here too.
+  if (report.user_id && report.report_id) {
+    paths.push(`${report.user_id}/${report.report_id}-annotated.png`)
+  }
+
   if (paths.length > 0) {
-    await supabase.storage.from('hazard-images').remove(paths)
+    await supabase.storage.from('hazard-images').remove([...new Set(paths)])
   }
 
   // Notify BEFORE deleting, and deliberately with report_id left out —

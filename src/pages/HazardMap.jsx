@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { MapContainer, Marker, Popup, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { Calendar, Eye, EyeOff, LocateFixed, Map as MapIcon, MapPin, ShieldCheck, Wrench } from 'lucide-react'
+import { Calendar, Eye, EyeOff, LocateFixed, Map as MapIcon, MapPin, ShieldCheck, Wrench, ZoomIn } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_ZOOM_OUT, CITY_MIN_ZOOM, USER_FOCUS_ZOOM } from '../lib/mapConfig'
 import { useUserLocation } from '../lib/useUserLocation'
@@ -23,30 +23,78 @@ import LoadingState from '../components/ui/LoadingState'
 function PopupImage({ report, onOpenLightbox }) {
   const { before, after } = getBeforeAfterImages(report)
   const hasBoth = report.status === 'resolved' && before.length > 0 && after.length > 0
+  const combined = [...before, ...after]
 
   const [showingAfter, setShowingAfter] = useState(true)
 
   const activeSet = hasBoth ? (showingAfter ? after : before) : before.length > 0 ? before : after
   if (activeSet.length === 0) return null
 
-  function handleClick() {
-    const combined = [...before, ...after]
-    const startIndex = hasBoth && showingAfter ? before.length : 0
-    onOpenLightbox(combined, startIndex)
+  // Where a photo in the currently shown set sits inside the full gallery.
+  const combinedIndex = (i) => (activeSet === after && before.length > 0 ? before.length + i : i)
+
+  function openAt(index) {
+    onOpenLightbox(combined, index)
+  }
+  function handleClick(e) {
+    // Leaflet listens for clicks on the map behind the popup; keep the tap on
+    // the photo from being treated as a map interaction.
+    e?.stopPropagation()
+    openAt(combinedIndex(0))
   }
 
   return (
     <div className="mb-2">
-      <button type="button" onClick={handleClick} className="block w-full">
+      <button
+        type="button"
+        onClick={handleClick}
+        aria-label={`Open ${combined.length === 1 ? 'photo' : `${combined.length} photos`} full screen`}
+        className="group relative block w-full overflow-hidden rounded-xl bg-canvas ring-1 ring-line transition hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+      >
         <img
           src={activeSet[0].url}
           alt=""
-          className="max-h-40 w-full cursor-zoom-in rounded-lg bg-canvas object-contain ring-1 ring-line transition hover:opacity-90"
+          className="block max-h-56 min-h-[112px] w-full cursor-zoom-in bg-canvas object-contain transition group-hover:opacity-95"
         />
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-6 text-[11px] font-semibold text-white">
+          <ZoomIn className="h-3.5 w-3.5" />
+          Tap to open · {combined.length} photo{combined.length === 1 ? '' : 's'}
+        </span>
       </button>
-      {(before.length > 1 || after.length > 1) && (
-        <p className="mt-1 text-center text-[10px] text-ink-muted">Click photo to view all & zoom</p>
+
+      {/* A second, bigger target so the gallery is still reachable if a tap on
+          the photo itself is missed on a small screen. */}
+      <button
+        type="button"
+        onClick={handleClick}
+        className="mt-2 flex min-h-[36px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary text-[11px] font-semibold text-white transition hover:bg-primary-dark"
+      >
+        <ZoomIn className="h-3.5 w-3.5" />
+        View {combined.length === 1 ? 'photo' : `all ${combined.length} photos`} full screen
+      </button>
+
+      {combined.length > 1 && (
+        <div className="mt-2 flex gap-1.5 overflow-x-auto pb-1">
+          {combined.map((photo, i) => (
+            <button
+              key={`${photo.url}-${i}`}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                openAt(i)
+              }}
+              aria-label={`Open photo ${i + 1}${photo.label ? ` (${photo.label})` : ''}`}
+              className="relative h-12 w-16 shrink-0 overflow-hidden rounded-md ring-1 ring-line transition hover:ring-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              <img src={photo.url} alt="" className="h-full w-full object-cover" />
+              <span className="absolute bottom-0 right-0 bg-black/65 px-1 text-[9px] font-semibold leading-tight text-white">
+                {photo.label === 'After' ? 'AF' : 'BF'}
+              </span>
+            </button>
+          ))}
+        </div>
       )}
+
       {hasBoth && (
         <div className="mt-1 flex overflow-hidden rounded-md border border-line text-[10px] font-semibold">
           <button

@@ -15,7 +15,8 @@ import { runHazardDetection } from '../lib/hazardDetection'
 import { friendlyAiError, invokeWithAiRetry } from '../lib/functionErrors'
 import { buildLocalReportDraft } from '../lib/localReportDraft'
 import ImageLightbox from '../components/ImageLightbox'
-import DetectionBoxes, { DetectionPreview, effectiveShowWeak } from '../components/DetectionBoxes'
+import DetectionBoxes, { DetectionPreview } from '../components/DetectionBoxes'
+import { effectiveShowWeak, normalizeDetections } from '../lib/detectionResult'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
 import { Badge, StatusBadge } from '../components/ui/Badge'
@@ -716,11 +717,15 @@ export default function ReportDetail() {
   // report stays visible but cannot trigger a new analysis run.
   const reportOutsideCity = !isInsideIligan(position[0], position[1])
   const images = report.hazard_images || []
+  // Citizen-side results carry the annotated photo generated at submission time.
+  const { annotatedImageUrl } = normalizeDetections(detection?.detections)
   const galleryImages = [
     ...images.map((img) => ({ url: img.image_url, label: "Citizen's Photo", imageId: img.image_id })),
     ...inspectionPhotos.map((p) => ({ url: p.photo_url, label: "Inspector's Photo" })),
     ...resolvedImages.map((img) => ({ url: img.image_url, label: 'After Repair' })),
+    ...(annotatedImageUrl ? [{ url: annotatedImageUrl, label: 'AI Annotated Photo' }] : []),
   ]
+  const annotatedIndex = annotatedImageUrl ? galleryImages.length - 1 : -1
 
   // Which photo the detection was run on (the report's first photo, unless it has been replaced).
   const detectedIndex = Math.max(0, images.findIndex((img) => img.image_id === detection?.image_id))
@@ -1252,6 +1257,25 @@ export default function ReportDetail() {
                   </span>
                 </div>
                 <p className="text-sm leading-relaxed text-ink-soft">{detection.detection_notes}</p>
+                {annotatedImageUrl && (
+                  <div>
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-soft">
+                      Annotated photo saved at submission
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setLightboxIndex(annotatedIndex)}
+                      aria-label="Open the saved annotated photo"
+                      className="block max-w-full rounded-lg ring-1 ring-line transition hover:ring-primary/50"
+                    >
+                      <img
+                        src={annotatedImageUrl}
+                        alt="Citizen's photo with AI detection boxes"
+                        className="block max-h-48 max-w-full rounded-lg object-contain"
+                      />
+                    </button>
+                  </div>
+                )}
                 <DetectionPreview
                   detection={detection}
                   imageUrl={detectedImage?.image_url}
@@ -1439,7 +1463,7 @@ export default function ReportDetail() {
           onIndexChange={setLightboxIndex}
           onClose={() => setLightboxIndex(null)}
           renderOverlay={(image) =>
-            image.imageId && image.imageId === detection?.image_id && detection?.detections?.length ? (
+            image.imageId && image.imageId === detection?.image_id ? (
               <DetectionBoxes
                 detections={detection.detections}
                 showWeak={effectiveShowWeak(detection.detections, showWeakBoxes)}

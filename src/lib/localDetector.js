@@ -295,6 +295,10 @@ export function loadSession(ort = globalThis.ort) {
   }
   if (!sessionPromise) {
     ort.env.wasm.wasmPaths = ORT_WASM_BASE
+    // Multi-threaded WASM needs cross-origin isolation (COOP/COEP). Without it
+    // browsers log a SharedArrayBuffer warning and silently fall back, which makes
+    // first runs inconsistent. Pinning one thread is slower but deterministic.
+    ort.env.wasm.numThreads = 1
     sessionPromise = (async () => {
       // Fetch the model ourselves so a missing file or an HTML fallback page
       // produces a clear message instead of ONNX Runtime's "protobuf parsing

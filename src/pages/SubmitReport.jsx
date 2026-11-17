@@ -31,6 +31,9 @@ import { Field, Textarea } from '../components/ui/Field'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
 import HazardTypePicker from '../components/HazardTypePicker'
+import DetectionBoxes, { DetectionPreview } from '../components/DetectionBoxes'
+import ImageLightbox from '../components/ImageLightbox'
+import { buildAnnotatedImage, effectiveShowWeak } from '../lib/detectionResult'
 
 // Fix Leaflet's default marker icon, which breaks under Vite's bundling by default
 import markerIcon from 'leaflet/dist/images/marker-icon.png'
@@ -100,6 +103,10 @@ export default function SubmitReport() {
   const [mlSuggestion, setMlSuggestion] = useState(null)
   const [mlResult, setMlResult] = useState(null)
   const [pendingType, setPendingType] = useState(null)
+  // Mirrors the admin viewer: null follows the automatic weak-box rule, an
+  // explicit true/false means the citizen used the checkbox.
+  const [showWeakBoxes, setShowWeakBoxes] = useState(null)
+  const [lightboxIndex, setLightboxIndex] = useState(null)
   const detectRequest = useRef(0)
   // Set only by a real click in HazardTypePicker. A slow detection must never
   // overwrite a choice the citizen just made while the model was still running.
@@ -118,6 +125,8 @@ export default function SubmitReport() {
     setDetectError('')
     setMlSuggestion(null)
     setMlResult(null)
+    setShowWeakBoxes(null)
+    setLightboxIndex(null)
   }
 
   /**
@@ -182,9 +191,12 @@ export default function SubmitReport() {
     setImagePreviews((prev) => [...prev, ...filesToAdd.map((f) => URL.createObjectURL(f))])
     e.target.value = '' // allows re-selecting the same file later if removed
 
-    // Uploading a new primary photo only makes the old result stale. The citizen
-    // decides when to analyze by tapping the Analyze Image button below.
-    if (imageFiles.length === 0) invalidateDetectionForPrimaryChange()
+    // The first photo drives detection automatically, just like the old flow.
+    // Extra photos never overwrite its result.
+    if (imageFiles.length === 0) {
+      invalidateDetectionForPrimaryChange()
+      runDetection(filesToAdd[0])
+    }
   }
 
   function removeImage(index) {
@@ -192,7 +204,11 @@ export default function SubmitReport() {
     setImageFiles(nextFiles)
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
 
-    if (index === 0) invalidateDetectionForPrimaryChange()
+    if (index === 0) {
+      invalidateDetectionForPrimaryChange()
+      // If another photo becomes primary, analyze it automatically too.
+      if (nextFiles[0]) runDetection(nextFiles[0])
+    }
   }
 
   /** Manual choices win, but a disagreement with the AI is confirmed first. */
@@ -245,6 +261,9 @@ export default function SubmitReport() {
   function handleSubmit(e) {
     e.preventDefault()
 
+    // Never let a report leave before its photo has been analyzed — otherwise
+    // the citizen-side result cannot be saved with it.
+    if (detecting) return toast.error('Please wait for the AI analysis to finish before submitting')
     if (!title) return toast.error('Please select what you are reporting')
     if (!description.trim()) return toast.error('Please describe the hazard')
     if (!position) return toast.error('Please pin the hazard location on the map')
@@ -275,6 +294,22 @@ export default function SubmitReport() {
     let detectionSaveFailed = false
 
     try {
+      // If the automatic analysis never completed (a slow first model download
+      // or a transient WASM error), give it one more shot before saving. The
+      // loader already clears a failed session, so this can succeed on retry.
+      let finalResult = mlResult
+      if (!finalResult && imageFiles[0]) {
+        try {
+          const result = await detectInFile(imageFiles[0])
+          finalResult = {
+            summary: result.summary,
+            storedBoxes: toStoredDetections(result.detections || [], result.imageSize.width, result.imageSize.height),
+          }
+        } catch (err) {
+          console.warn('Submit-time AI retry failed:', err)
+        }
+      }
+
       // 1. Insert the report
       const { data: report, error: reportError } = await supabase
         .from('hazard_reports')
@@ -314,19 +349,47 @@ export default function SubmitReport() {
 
       if (imageError) throw imageError
 
-      // 4. Save the ML result computed while the citizen was filling the form, so
-      //    the admin sees it immediately. This is best-effort: a missing RLS policy
-      //    must never block the report itself. Requires supabase/citizen-detection-insert.sql.
-      if (mlResult?.summary && savedImages?.[0]) {
+      // 4. Save the ML result computed while the citizen was filling the form,
+      //    INCLUDING runs where nothing was confident. The admin then sees exactly
+      //    what happened without re-running anything. Best-effort: a missing RLS
+      //    policy must never block the report itself.
+      //    Requires supabase/citizen-detection-insert.sql.
+      if (finalResult && savedImages?.[0]) {
+        const boxes = finalResult.storedBoxes || []
+        const summary = finalResult.summary
+        const bestBox = boxes.reduce((best, d) => (!best || d.confidence > best.confidence ? d : best), null)
+
+        // The annotated primary image goes in the same bucket as the uploaded
+        // photos, but deliberately gets no hazard_images row so it never shows
+        // up as a "citizen photo" in the public gallery.
+        let annotatedImageUrl = null
+        try {
+          const blob = await buildAnnotatedImage(imageFiles[0], boxes)
+          const annotatedPath = `${user.id}/${report.report_id}-annotated.png`
+          const { error: annotatedError } = await supabase.storage
+            .from('hazard-images')
+            .upload(annotatedPath, blob, { contentType: 'image/png' })
+          if (annotatedError) {
+            console.warn('Annotated image could not be saved:', annotatedError)
+          } else {
+            annotatedImageUrl = supabase.storage.from('hazard-images').getPublicUrl(annotatedPath).data.publicUrl
+          }
+        } catch (err) {
+          console.warn('Annotated image could not be rendered:', err)
+        }
+
         const { error: detectionError } = await supabase.from('hazard_detection_results').insert({
           report_id: report.report_id,
           image_id: savedImages[0].image_id,
-          hazard_type: mlResult.summary.hazardType,
-          severity_level: mlResult.summary.severityLevel,
-          confidence_score: mlResult.summary.confidenceScore,
-          detection_notes: mlResult.summary.notes,
+          hazard_type: summary?.hazardType || title,
+          severity_level: summary?.severityLevel || null,
+          confidence_score: summary?.confidenceScore ?? (bestBox ? Math.round(bestBox.confidence * 10000) / 100 : 0),
+          detection_notes:
+            summary?.notes ||
+            `The trained YOLOv8 model ran on this photo but found nothing confident enough to trust` +
+              (bestBox ? ` (best guess ${bestBox.label.toLowerCase()} at ${Math.round(bestBox.confidence * 100)}%).` : '.'),
           detection_source: 'yolov8_local',
-          detections: mlResult.storedBoxes,
+          detections: { boxes, annotatedImageUrl },
         })
         if (detectionError) {
           detectionSaveFailed = true
@@ -365,20 +428,21 @@ export default function SubmitReport() {
       <div className="flex items-start gap-2.5 rounded-2xl border border-primary/15 bg-primary-light/40 p-3.5">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <p className="text-xs leading-relaxed text-ink-soft">
-          Check your first photo, then tap <strong className="font-semibold text-ink">Analyze Image</strong> to let the
-          trained model suggest a hazard type. Reports are reviewed by an LGU admin before they appear on the public map.
-          Only hazards located inside <strong className="font-semibold text-ink">Iligan City</strong> are accepted.
+          Your first photo is analyzed automatically with our trained model when you upload it — bounding boxes show
+          what it found and the matching hazard type is selected below. Reports are reviewed by an LGU admin before they
+          appear on the public map. Only hazards inside <strong className="font-semibold text-ink">Iligan City</strong>{' '}
+          are accepted.
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         {/* TOP LEFT: photos */}
         <Card className="p-5">
-          <CardHeader title="Photos" description="Check the first photo, then analyze it when you're ready." icon={Camera} />
+          <CardHeader title="Photos" description="The first photo is analyzed automatically on upload." icon={Camera} />
 
           <div className="mt-5">
             <p className="mb-3 text-[11px] leading-relaxed text-ink-muted">
-              Up to {MAX_IMAGES} photos. Upload first, check that the photo is correct, then run the AI when you are ready.
+              Up to {MAX_IMAGES} photos. The first one is analyzed automatically; tap the preview to zoom the boxes.
             </p>
               {imagePreviews.length > 0 && (
                 <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
@@ -403,26 +467,18 @@ export default function SubmitReport() {
                 </div>
               )}
 
-              {imageFiles.length > 0 && (
-                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/15 bg-primary-light/30 p-2.5">
-                  <Button
-                    type="button"
-                    variant={mlResult ? 'secondary' : 'gradient'}
-                    size="sm"
-                    icon={Sparkles}
-                    onClick={() => runDetection(imageFiles[0])}
-                    disabled={submitting}
-                    loading={detecting}
-                  >
-                    {detecting ? 'Analyzing…' : mlResult ? 'Analyze again' : 'Analyze Image'}
-                  </Button>
-                  <p className="text-[11px] leading-relaxed text-ink-soft">
-                    {detecting
-                      ? 'Running the trained YOLO model on the first photo…'
-                      : mlResult
-                        ? 'AI result is ready — check the hazard type on the right.'
-                        : 'Check the first photo, then tap to run the trained model.'}
+              {imagePreviews[0] && mlResult?.storedBoxes?.length > 0 && (
+                <div className="mb-3">
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-soft">
+                    AI detection preview
                   </p>
+                  <DetectionPreview
+                    detection={{ detections: mlResult.storedBoxes }}
+                    imageUrl={imagePreviews[0]}
+                    showWeak={showWeakBoxes}
+                    onShowWeakChange={setShowWeakBoxes}
+                    onOpen={() => setLightboxIndex(0)}
+                  />
                 </div>
               )}
 
@@ -432,12 +488,10 @@ export default function SubmitReport() {
                   className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-line bg-canvas/50 px-4 py-6 text-center transition hover:border-primary/40 hover:bg-primary-light/30"
                 >
                   <ImagePlus className="h-7 w-7 text-primary/70" />
-                  <span className="text-sm font-medium text-ink-soft">
-                    {imageFiles.length === 0
-                      ? 'Click to upload photos'
-                      : `Add more (${MAX_IMAGES - imageFiles.length} remaining)`}
+                  <span className="text-sm font-medium text-ink-soft">Upload</span>
+                  <span className="text-[11px] text-ink-muted">
+                    JPG or PNG — {MAX_IMAGES - imageFiles.length} remaining
                   </span>
-                  <span className="text-[11px] text-ink-muted">JPG or PNG — up to {MAX_IMAGES} images</span>
                 </label>
               )}
               <input
@@ -482,9 +536,22 @@ export default function SubmitReport() {
                   Pick a different card below to override the suggestion. We will ask you to confirm.
                 </p>
               </div>
+            ) : mlResult?.storedBoxes?.length ? (
+              <p className="text-xs leading-relaxed text-warning">
+                The trained model only found weak guesses for this photo. Please choose the hazard type yourself — the
+                boxes are shown in the preview.
+              </p>
+            ) : mlResult ? (
+              <div className="space-y-1">
+                <p className="text-xs leading-relaxed text-ink-soft">
+                  The trained model ran but found no confident hazard in this photo. Please choose the hazard type
+                  yourself — a closer photo may work better.
+                </p>
+                <p className="text-[11px] text-ink-muted">You can still submit; an LGU admin will review the report.</p>
+              </div>
             ) : (
               <p className="text-xs leading-relaxed text-ink-soft">
-                {detectError || 'Upload a photo, then tap Analyze Image to get a suggestion here.'}
+                {detectError || 'Upload a photo — the first one is analyzed automatically.'}
               </p>
             )}
           </div>
@@ -589,8 +656,14 @@ export default function SubmitReport() {
               variant="gradient"
               size="lg"
               loading={submitting}
-              disabled={outsideCity}
-              title={outsideCity ? 'Reports are only accepted within Iligan City' : undefined}
+              disabled={outsideCity || detecting}
+              title={
+                detecting
+                  ? 'Please wait for the AI analysis to finish'
+                  : outsideCity
+                    ? 'Reports are only accepted within Iligan City'
+                    : undefined
+              }
               iconRight={submitting ? undefined : Send}
               className="w-full sm:w-auto"
             >
@@ -641,7 +714,11 @@ export default function SubmitReport() {
                   {imageFiles.length} photo{imageFiles.length === 1 ? '' : 's'}
                 </p>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
-                  {mlResult ? 'AI result will be included for review.' : 'AI analysis was not run for this report.'}
+                  {mlResult?.summary
+                    ? 'AI result will be included for review.'
+                    : mlResult
+                      ? 'AI ran but found no confident result.'
+                      : 'AI analysis was not run for this report.'}
                 </p>
               </div>
             </div>
@@ -700,6 +777,23 @@ export default function SubmitReport() {
           </p>
         </div>
       </Modal>
+
+      {lightboxIndex !== null && imagePreviews[lightboxIndex] && (
+        <ImageLightbox
+          images={imagePreviews.map((url, i) => ({ url, label: `Photo ${i + 1}`, index: i }))}
+          index={lightboxIndex}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          renderOverlay={(image) =>
+            image.index === 0 && mlResult?.storedBoxes?.length ? (
+              <DetectionBoxes
+                detections={mlResult.storedBoxes}
+                showWeak={effectiveShowWeak(mlResult.storedBoxes, showWeakBoxes)}
+              />
+            ) : null
+          }
+        />
+      )}
     </div>
   )
 }

@@ -21,15 +21,15 @@ function formatDate(dateString) {
  */
 export default function ReportSheet({ report, onClose, onOpenLightbox }) {
   const { before, after } = getBeforeAfterImages(report)
+  const combined = [...before, ...after]
   const hasBoth = report.status === 'resolved' && before.length > 0 && after.length > 0
   const [showingAfter, setShowingAfter] = useState(true)
 
   const activeSet = hasBoth ? (showingAfter ? after : before) : before.length > 0 ? before : after
-  const photoCount = before.length + after.length
+  const photoCount = combined.length
 
   function handlePhotoClick() {
     if (activeSet.length === 0) return
-    const combined = [...before, ...after]
     const startIndex = hasBoth && showingAfter ? before.length : 0
     onOpenLightbox(combined, startIndex)
   }
@@ -56,13 +56,43 @@ export default function ReportSheet({ report, onClose, onOpenLightbox }) {
               <img
                 src={activeSet[0].url}
                 alt=""
-                className="max-h-[38dvh] w-full object-contain transition group-hover:opacity-95"
+                className="block max-h-[42dvh] min-h-[150px] w-full cursor-zoom-in bg-canvas object-contain transition group-hover:opacity-95"
               />
-              <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-gradient-to-t from-black/60 to-transparent px-3 pb-2 pt-6 text-[11px] font-semibold text-white">
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-gradient-to-t from-black/70 to-transparent px-3 pb-2 pt-6 text-[11px] font-semibold text-white">
                 <Images className="h-3.5 w-3.5" />
                 {photoCount > 1 ? `Tap to view all ${photoCount} photos` : 'Tap to view full screen'}
               </span>
             </button>
+
+            {/* Reliable second target, plus thumbnails so any photo can be
+                opened directly instead of swiping through the whole set. */}
+            <button
+              type="button"
+              onClick={handlePhotoClick}
+              className="mt-2 flex min-h-[40px] w-full items-center justify-center gap-1.5 rounded-lg bg-primary text-xs font-semibold text-white transition hover:bg-primary-dark"
+            >
+              <Images className="h-4 w-4" />
+              View {photoCount === 1 ? 'photo' : `all ${photoCount} photos`} full screen
+            </button>
+
+            {photoCount > 1 && (
+              <div className="mt-2 flex gap-2 overflow-x-auto pb-1">
+                {combined.map((photo, i) => (
+                  <button
+                    key={`${photo.url}-${i}`}
+                    type="button"
+                    onClick={() => onOpenLightbox(combined, i)}
+                    aria-label={`Open photo ${i + 1}${photo.label ? ` (${photo.label})` : ''}`}
+                    className="relative h-14 w-20 shrink-0 overflow-hidden rounded-lg ring-1 ring-line transition hover:ring-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                  >
+                    <img src={photo.url} alt="" className="h-full w-full object-cover" />
+                    <span className="absolute bottom-0 right-0 bg-black/65 px-1 text-[9px] font-semibold leading-tight text-white">
+                      {photo.label === 'After' ? 'AF' : 'BF'}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
 
             {hasBoth && (
               <div className="mt-2 flex overflow-hidden rounded-lg border border-line text-[11px] font-semibold">
