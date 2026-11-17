@@ -120,6 +120,17 @@ export default function SubmitReport() {
     setMlResult(null)
   }
 
+  /**
+   * A different primary photo makes any previous result stale. Clear the AI
+   * selection only if it came from the model — a choice the citizen confirmed
+   * manually must survive a photo swap.
+   */
+  function invalidateDetectionForPrimaryChange() {
+    const wasMlSelection = Boolean(mlSuggestion) && !manualTypeRef.current && title === mlSuggestion
+    clearDetection()
+    if (wasMlSelection) setTitle('')
+  }
+
   /** Runs the trained model on a local File, before anything is uploaded. */
   async function runDetection(file) {
     const requestId = ++detectRequest.current
@@ -171,9 +182,9 @@ export default function SubmitReport() {
     setImagePreviews((prev) => [...prev, ...filesToAdd.map((f) => URL.createObjectURL(f))])
     e.target.value = '' // allows re-selecting the same file later if removed
 
-    // Only the first photo drives detection. Adding extra photos must not
-    // overwrite the suggestion the citizen is already looking at.
-    if (imageFiles.length === 0) runDetection(filesToAdd[0])
+    // Uploading a new primary photo only makes the old result stale. The citizen
+    // decides when to analyze by tapping the Analyze Image button below.
+    if (imageFiles.length === 0) invalidateDetectionForPrimaryChange()
   }
 
   function removeImage(index) {
@@ -181,11 +192,7 @@ export default function SubmitReport() {
     setImageFiles(nextFiles)
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
 
-    if (index === 0) {
-      // Removing the primary photo invalidates its result; analyse the new primary.
-      if (nextFiles[0]) runDetection(nextFiles[0])
-      else clearDetection()
-    }
+    if (index === 0) invalidateDetectionForPrimaryChange()
   }
 
   /** Manual choices win, but a disagreement with the AI is confirmed first. */
@@ -358,20 +365,20 @@ export default function SubmitReport() {
       <div className="flex items-start gap-2.5 rounded-2xl border border-primary/15 bg-primary-light/40 p-3.5">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
         <p className="text-xs leading-relaxed text-ink-soft">
-          Your first photo is used for AI-assisted hazard detection. Reports are reviewed by an LGU admin before they
-          appear on the public map. Only hazards located inside <strong className="font-semibold text-ink">Iligan City</strong>{' '}
-          are accepted.
+          Check your first photo, then tap <strong className="font-semibold text-ink">Analyze Image</strong> to let the
+          trained model suggest a hazard type. Reports are reviewed by an LGU admin before they appear on the public map.
+          Only hazards located inside <strong className="font-semibold text-ink">Iligan City</strong> are accepted.
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         {/* TOP LEFT: photos */}
         <Card className="p-5">
-          <CardHeader title="Photos" description="The first photo is analyzed by the trained model." icon={Camera} />
+          <CardHeader title="Photos" description="Check the first photo, then analyze it when you're ready." icon={Camera} />
 
           <div className="mt-5">
             <p className="mb-3 text-[11px] leading-relaxed text-ink-muted">
-              Up to {MAX_IMAGES} photos. Adding or replacing the first one re-runs the AI suggestion.
+              Up to {MAX_IMAGES} photos. Upload first, check that the photo is correct, then run the AI when you are ready.
             </p>
               {imagePreviews.length > 0 && (
                 <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
@@ -393,6 +400,29 @@ export default function SubmitReport() {
                       </button>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {imageFiles.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/15 bg-primary-light/30 p-2.5">
+                  <Button
+                    type="button"
+                    variant={mlResult ? 'secondary' : 'gradient'}
+                    size="sm"
+                    icon={Sparkles}
+                    onClick={() => runDetection(imageFiles[0])}
+                    disabled={submitting}
+                    loading={detecting}
+                  >
+                    {detecting ? 'Analyzing…' : mlResult ? 'Analyze again' : 'Analyze Image'}
+                  </Button>
+                  <p className="text-[11px] leading-relaxed text-ink-soft">
+                    {detecting
+                      ? 'Running the trained YOLO model on the first photo…'
+                      : mlResult
+                        ? 'AI result is ready — check the hazard type on the right.'
+                        : 'Check the first photo, then tap to run the trained model.'}
+                  </p>
                 </div>
               )}
 
@@ -454,7 +484,7 @@ export default function SubmitReport() {
               </div>
             ) : (
               <p className="text-xs leading-relaxed text-ink-soft">
-                {detectError || 'Upload a photo and the AI will suggest a hazard type here.'}
+                {detectError || 'Upload a photo, then tap Analyze Image to get a suggestion here.'}
               </p>
             )}
           </div>
@@ -611,7 +641,7 @@ export default function SubmitReport() {
                   {imageFiles.length} photo{imageFiles.length === 1 ? '' : 's'}
                 </p>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
-                  The first photo is used for AI detection.
+                  {mlResult ? 'AI result will be included for review.' : 'AI analysis was not run for this report.'}
                 </p>
               </div>
             </div>
