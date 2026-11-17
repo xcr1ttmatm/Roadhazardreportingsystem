@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { MapContainer, Marker, Popup, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { Calendar, LocateFixed, Map as MapIcon, MapPin, ShieldCheck, Wrench } from 'lucide-react'
+import { Calendar, Eye, EyeOff, LocateFixed, Map as MapIcon, MapPin, ShieldCheck, Wrench } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { CITY_CENTER, CITY_BOUNDS, CITY_ZOOM_OUT, CITY_MIN_ZOOM, USER_FOCUS_ZOOM } from '../lib/mapConfig'
 import { useUserLocation } from '../lib/useUserLocation'
@@ -172,6 +172,9 @@ export default function HazardMap() {
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState(null) // { images, index } | null
   const [selectedReport, setSelectedReport] = useState(null) // mobile bottom sheet
+  // Resolved hazards are hidden by default so the map stays about active risks.
+  // The toggle below is display-only; the query still fetches both statuses.
+  const [showResolved, setShowResolved] = useState(false)
   const isMobile = useMediaQuery('(max-width: 639px), (max-height: 600px)')
 
   const {
@@ -203,7 +206,8 @@ export default function HazardMap() {
 
   const activeCount = reports.filter((r) => r.status === 'approved').length // repaired ones are no longer active
   const resolvedCount = reports.filter((r) => r.status === 'resolved').length
-  const nearbyCount = countNearbyHazards(userPos, reports)
+  const visibleReports = showResolved ? reports : reports.filter((r) => r.status !== 'resolved')
+  const nearbyCount = countNearbyHazards(userPos, visibleReports)
   // States where asking again is useful. 'denied' needs the browser setting
   // changed first, but re-checking costs nothing and picks up the change.
   const canAskAgain =
@@ -248,6 +252,17 @@ export default function HazardMap() {
               <span className="h-2 w-2 rounded-full bg-success" />
               {resolvedCount} repaired
             </span>
+            {resolvedCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowResolved((value) => !value)}
+                aria-pressed={showResolved}
+                className="flex items-center gap-1.5 rounded-xl border border-line bg-white px-3 py-2 text-[11px] font-semibold text-primary shadow-soft transition hover:bg-primary-light/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+              >
+                {showResolved ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {showResolved ? 'Hide resolved' : `Show resolved (${resolvedCount})`}
+              </button>
+            )}
           </div>
         }
       />
@@ -298,7 +313,7 @@ export default function HazardMap() {
           {/* On a phone the map box is shorter than a report card, so Leaflet
               clips the popup and the photo becomes unreachable. Mobile markers
               open the portaled bottom sheet instead; desktop keeps the popup. */}
-          {reports.map((report) => (
+          {visibleReports.map((report) => (
             <Marker
               key={report.report_id}
               position={getDisplayPosition(report)}
@@ -365,36 +380,42 @@ export default function HazardMap() {
           <LocateFixed className="h-5 w-5" />
         </button>
 
-        {/* Legend */}
-        <div className="absolute bottom-4 left-4 z-[400] rounded-xl border border-line bg-white/95 px-4 py-3 shadow-float backdrop-blur">
-          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-soft">
-            <ShieldCheck className="h-3 w-3 text-primary" />
-            Severity
-          </p>
-          <div className="space-y-1.5">
-            <LegendRow color={SEVERITY_COLORS.severe} label="Danger" />
-            <LegendRow color={SEVERITY_COLORS.moderate} label="Fair" />
-            <LegendRow color={SEVERITY_COLORS.low} label="Good" />
-            <LegendRow color={SEVERITY_COLORS.default} label="Unspecified" />
-          </div>
-          <div className="mt-2 flex items-center gap-2 border-t border-line-soft pt-2 text-[11px] font-medium text-ink-soft">
-            <span className="h-0 w-5 border-t-2 border-dashed border-primary" aria-hidden="true" />
-            Iligan City coverage
-          </div>
+      </div>
+
+      {/* Legend lives below the map, not on top of it — on a phone it used to
+          cover a large part of the already-short map. */}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-line bg-white px-4 py-3 shadow-soft">
+        <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.08em] text-ink-soft">
+          <ShieldCheck className="h-3 w-3 text-primary" />
+          Severity
+        </p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <LegendRow color={SEVERITY_COLORS.severe} label="Danger" />
+          <LegendRow color={SEVERITY_COLORS.moderate} label="Fair" />
+          <LegendRow color={SEVERITY_COLORS.low} label="Good" />
+          <LegendRow color={SEVERITY_COLORS.default} label="Unspecified" />
+        </div>
+        <div className="flex items-center gap-2 text-[11px] font-medium text-ink-soft sm:ml-auto">
+          <span className="h-0 w-5 border-t-2 border-dashed border-primary" aria-hidden="true" />
+          Iligan City coverage
         </div>
       </div>
 
       {loading ? (
         <LoadingState label="Loading verified hazards…" />
       ) : (
-        reports.length === 0 && (
+        visibleReports.length === 0 && (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-line bg-white/60 px-6 py-10 text-center">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-primary-light to-secondary-light text-primary">
               <MapPin className="h-5 w-5" />
             </span>
-            <p className="mt-3 text-sm font-semibold text-ink">No approved hazards yet</p>
+            <p className="mt-3 text-sm font-semibold text-ink">
+              {resolvedCount > 0 && !showResolved ? 'No active hazards right now' : 'No hazards to show yet'}
+            </p>
             <p className="mt-1 max-w-sm text-xs leading-relaxed text-ink-soft">
-              Once the LGU approves reports, they'll appear here.
+              {resolvedCount > 0 && !showResolved
+                ? 'All verified reports have been repaired. Use “Show resolved” above to see them.'
+                : "Once the LGU approves reports, they'll appear here."}
             </p>
           </div>
         )

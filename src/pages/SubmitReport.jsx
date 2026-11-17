@@ -1,11 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { MapContainer, Marker, CircleMarker, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
-import { ImagePlus, LocateFixed, Send, X, FilePlus, MapPin, Camera, Info, AlertTriangle } from 'lucide-react'
+import {
+  ImagePlus,
+  LocateFixed,
+  Send,
+  X,
+  FilePlus,
+  MapPin,
+  Camera,
+  Info,
+  AlertTriangle,
+  Sparkles,
+  Check,
+} from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
+import { detectInFile, toStoredDetections } from '../lib/localDetector'
+import { HAZARD_TYPE_VALUES } from '../lib/hazardTypes'
 import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
 import { isInsideIligan } from '../lib/geo'
 import { getCurrentLocation, getLocationPermission, locationErrorMessage } from '../lib/geolocation'
@@ -58,6 +72,13 @@ function FlyToPosition({ position }) {
   return null
 }
 
+const HAZARD_TYPE_LOOKUP = Object.fromEntries(HAZARD_TYPE_VALUES.map((value) => [value.toLowerCase(), value]))
+
+/** The model reports lowercase class names; the form stores the picker's title-case values. */
+function canonicalHazardType(value) {
+  return value ? HAZARD_TYPE_LOOKUP[String(value).toLowerCase()] ?? null : null
+}
+
 export default function SubmitReport() {
   const { user } = useAuth()
   const navigate = useNavigate()
@@ -71,11 +92,64 @@ export default function SubmitReport() {
   const [submitting, setSubmitting] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
 
+  // AI-assisted type selection. `mlSuggestion` is kept separate from `title` so that
+  // applying the model's answer does not look like a manual change (and cannot itself
+  // open the "are you sure?" dialog). `mlResult` is saved with the report at submit.
+  const [detecting, setDetecting] = useState(false)
+  const [detectError, setDetectError] = useState('')
+  const [mlSuggestion, setMlSuggestion] = useState(null)
+  const [mlResult, setMlResult] = useState(null)
+  const [pendingType, setPendingType] = useState(null)
+  const detectRequest = useRef(0)
+  // Set only by a real click in HazardTypePicker. A slow detection must never
+  // overwrite a choice the citizen just made while the model was still running.
+  const manualTypeRef = useRef(false)
+
   // True when the current pin is outside the Iligan City service area. Kept
   // derived (not separate state) so the map, message and button can never drift.
   const outsideCity = position ? !isInsideIligan(position.lat, position.lng) : false
 
   const MAX_IMAGES = 5
+
+  /** Invalidates any in-flight analysis and clears the AI feedback. */
+  function clearDetection() {
+    detectRequest.current += 1
+    setDetecting(false)
+    setDetectError('')
+    setMlSuggestion(null)
+    setMlResult(null)
+  }
+
+  /** Runs the trained model on a local File, before anything is uploaded. */
+  async function runDetection(file) {
+    const requestId = ++detectRequest.current
+    manualTypeRef.current = false // a new primary photo gets a fresh AI decision
+    setDetecting(true)
+    setDetectError('')
+    setMlSuggestion(null)
+    setMlResult(null)
+    try {
+      const result = await detectInFile(file)
+      if (requestId !== detectRequest.current) return // a newer photo replaced this one
+
+      const type = canonicalHazardType(result.summary?.hazardType)
+      setMlResult({
+        summary: result.summary,
+        storedBoxes: toStoredDetections(result.detections || [], result.imageSize.width, result.imageSize.height),
+      })
+      if (type) {
+        setMlSuggestion(type) // set BEFORE title, for the comparison below
+        // Only auto-select when the citizen has not picked a type in the meantime.
+        if (!manualTypeRef.current) setTitle(type)
+      }
+    } catch (err) {
+      if (requestId !== detectRequest.current) return
+      console.warn('Citizen-side ML detection failed:', err)
+      setDetectError('AI detection is unavailable right now. Please choose a hazard type yourself.')
+    } finally {
+      if (requestId === detectRequest.current) setDetecting(false)
+    }
+  }
 
   function handleImageChange(e) {
     const newFiles = Array.from(e.target.files || [])
@@ -96,11 +170,38 @@ export default function SubmitReport() {
     setImageFiles((prev) => [...prev, ...filesToAdd])
     setImagePreviews((prev) => [...prev, ...filesToAdd.map((f) => URL.createObjectURL(f))])
     e.target.value = '' // allows re-selecting the same file later if removed
+
+    // Only the first photo drives detection. Adding extra photos must not
+    // overwrite the suggestion the citizen is already looking at.
+    if (imageFiles.length === 0) runDetection(filesToAdd[0])
   }
 
   function removeImage(index) {
-    setImageFiles((prev) => prev.filter((_, i) => i !== index))
+    const nextFiles = imageFiles.filter((_, i) => i !== index)
+    setImageFiles(nextFiles)
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
+
+    if (index === 0) {
+      // Removing the primary photo invalidates its result; analyse the new primary.
+      if (nextFiles[0]) runDetection(nextFiles[0])
+      else clearDetection()
+    }
+  }
+
+  /** Manual choices win, but a disagreement with the AI is confirmed first. */
+  function handleTypeChange(nextType) {
+    manualTypeRef.current = true
+    if (nextType === title) return
+    if (mlSuggestion && nextType !== mlSuggestion) {
+      setPendingType(nextType)
+      return
+    }
+    setTitle(nextType)
+  }
+
+  function applyPendingType() {
+    if (pendingType) setTitle(pendingType)
+    setPendingType(null)
   }
 
   async function handleUseCurrentLocation() {
@@ -164,6 +265,7 @@ export default function SubmitReport() {
     }
 
     setSubmitting(true)
+    let detectionSaveFailed = false
 
     try {
       // 1. Insert the report
@@ -196,14 +298,40 @@ export default function SubmitReport() {
         uploadedUrls.push(urlData.publicUrl)
       }
 
-      // 3. Save all image records, linked to the report
-      const { error: imageError } = await supabase
+      // 3. Save all image records, linked to the report. Selecting image_id gives
+      //    the detection row below its required foreign key.
+      const { data: savedImages, error: imageError } = await supabase
         .from('hazard_images')
         .insert(uploadedUrls.map((url) => ({ report_id: report.report_id, image_url: url })))
+        .select('image_id')
 
       if (imageError) throw imageError
 
-      toast.success('Hazard report submitted! An LGU admin will review it.')
+      // 4. Save the ML result computed while the citizen was filling the form, so
+      //    the admin sees it immediately. This is best-effort: a missing RLS policy
+      //    must never block the report itself. Requires supabase/citizen-detection-insert.sql.
+      if (mlResult?.summary && savedImages?.[0]) {
+        const { error: detectionError } = await supabase.from('hazard_detection_results').insert({
+          report_id: report.report_id,
+          image_id: savedImages[0].image_id,
+          hazard_type: mlResult.summary.hazardType,
+          severity_level: mlResult.summary.severityLevel,
+          confidence_score: mlResult.summary.confidenceScore,
+          detection_notes: mlResult.summary.notes,
+          detection_source: 'yolov8_local',
+          detections: mlResult.storedBoxes,
+        })
+        if (detectionError) {
+          detectionSaveFailed = true
+          console.warn('AI result could not be saved with the report:', detectionError)
+        }
+      }
+
+      if (detectionSaveFailed) {
+        toast.error('Report submitted, but the AI result could not be saved. An admin will review it.')
+      } else {
+        toast.success('Hazard report submitted! An LGU admin will review it.')
+      }
       setConfirmOpen(false)
       // Open the new report in "My Reports" so the citizen can review the exact
       // location they pinned before leaving the flow.
@@ -237,28 +365,14 @@ export default function SubmitReport() {
       </div>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        {/* Left column: details */}
+        {/* TOP LEFT: photos */}
         <Card className="p-5">
-          <CardHeader title="Report details" description="What did you find and how does it look?" icon={Camera} />
+          <CardHeader title="Photos" description="The first photo is analyzed by the trained model." icon={Camera} />
 
-          <div className="mt-5 space-y-5">
-            <HazardTypePicker value={title} onChange={setTitle} />
-
-            <Field label="Description" htmlFor="hazard-description" required>
-              <Textarea
-                id="hazard-description"
-                required
-                rows={5}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe the road damage — size, depth, how it affects traffic, etc."
-              />
-            </Field>
-
-            <Field
-              label="Photos"
-              hint={`Up to ${MAX_IMAGES} photos. The first one is used for AI detection.`}
-            >
+          <div className="mt-5">
+            <p className="mb-3 text-[11px] leading-relaxed text-ink-muted">
+              Up to {MAX_IMAGES} photos. Adding or replacing the first one re-runs the AI suggestion.
+            </p>
               {imagePreviews.length > 0 && (
                 <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
                   {imagePreviews.map((src, i) => (
@@ -304,11 +418,70 @@ export default function SubmitReport() {
                 onChange={handleImageChange}
                 className="hidden"
               />
+          </div>
+        </Card>
+
+        {/* TOP RIGHT: AI-assisted hazard type */}
+        <Card className="p-5">
+          <CardHeader
+            title="Hazard type"
+            description="The AI suggestion is selected for you — change it if it is wrong."
+            icon={Sparkles}
+          />
+
+          <div aria-live="polite" className="mt-4 rounded-xl border border-line bg-canvas/70 p-3">
+            {detecting ? (
+              <p className="flex items-center gap-2 text-xs font-medium text-primary">
+                <Sparkles className="h-4 w-4 animate-pulse" />
+                Analyzing the first photo…
+              </p>
+            ) : mlResult?.summary ? (
+              <div className="space-y-1.5">
+                <p className="flex flex-wrap items-center gap-2 text-xs font-semibold text-ink">
+                  <span className="inline-flex items-center gap-1.5 rounded-lg bg-success-light px-2 py-1 text-success">
+                    <Check className="h-3.5 w-3.5" />
+                    {mlSuggestion || mlResult.summary.hazardType} · {Math.round(mlResult.summary.confidenceScore)}%
+                  </span>
+                  <span className="text-ink-soft">
+                    {mlSuggestion && title === mlSuggestion
+                      ? 'Selected below'
+                      : `You chose ${title ? title.toLowerCase() : 'a different type'}`}
+                  </span>
+                </p>
+                <p className="text-[11px] leading-relaxed text-ink-muted">
+                  Pick a different card below to override the suggestion. We will ask you to confirm.
+                </p>
+              </div>
+            ) : (
+              <p className="text-xs leading-relaxed text-ink-soft">
+                {detectError || 'Upload a photo and the AI will suggest a hazard type here.'}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-4">
+            <HazardTypePicker value={title} onChange={handleTypeChange} />
+          </div>
+        </Card>
+
+        {/* BOTTOM LEFT: description */}
+        <Card className="p-5">
+          <CardHeader title="Description" description="What did you see, and how bad is it?" icon={FilePlus} />
+          <div className="mt-5">
+            <Field label="Description" htmlFor="hazard-description" required>
+              <Textarea
+                id="hazard-description"
+                required
+                rows={5}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Describe the road damage — size, depth, how it affects traffic, etc."
+              />
             </Field>
           </div>
         </Card>
 
-        {/* Right column: map */}
+        {/* BOTTOM RIGHT: map */}
         <Card className="flex flex-col p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CardHeader
@@ -462,6 +635,39 @@ export default function SubmitReport() {
               Reports are reviewed by an LGU admin before they appear on the public map.
             </p>
           </div>
+        </div>
+      </Modal>
+
+      {/* Shown only when the citizen actively picks a card that disagrees with
+          the AI. The form value has NOT changed yet, so closing this dialog
+          simply keeps the ML suggestion. */}
+      <Modal
+        open={Boolean(pendingType)}
+        onClose={() => setPendingType(null)}
+        title="Change the hazard type?"
+        description={`The AI detected ${mlSuggestion || 'a different type'} from your first photo. Are you sure you want to use ${pendingType} instead?`}
+        size="sm"
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onClick={() => setPendingType(null)}
+              autoFocus
+            >
+              Keep AI result
+            </Button>
+            <Button variant="primary" onClick={applyPendingType}>
+              Use my choice
+            </Button>
+          </>
+        }
+      >
+        <div className="flex items-start gap-2.5 rounded-xl bg-primary-light/40 p-3">
+          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+          <p className="text-xs leading-relaxed text-ink-soft">
+            The AI result is only a suggestion. If the photo clearly shows {pendingType}, keep your choice — an LGU
+            admin will review the report either way.
+          </p>
         </div>
       </Modal>
     </div>

@@ -326,13 +326,11 @@ function drawLetterboxed(ctx, bitmap, region) {
   ctx.drawImage(bitmap, region.x, region.y, region.width, region.height, lb.padX, lb.padY, lb.newW, lb.newH)
 }
 
-/** Downloads a photo, runs the trained model on it, and returns detections + a summary. */
-export async function detectInBrowser(imageUrl, ort = globalThis.ort) {
-  const session = await loadSession(ort)
-
-  const res = await fetch(imageUrl)
-  if (!res.ok) throw new Error('Could not download the photo for analysis')
-  const bitmap = await createImageBitmap(await res.blob())
+/**
+ * Runs the whole inference path on an already-decoded bitmap. Shared by the admin's
+ * URL-based flow and the citizen's local-file flow, so both get identical results.
+ */
+async function analyzeBitmap(bitmap, ort, session) {
   const srcW = bitmap.width
   const srcH = bitmap.height
 
@@ -364,12 +362,34 @@ export async function detectInBrowser(imageUrl, ort = globalThis.ort) {
     tiled = true
   }
 
-  if (bitmap.close) bitmap.close()
-
   if (summary && tiled) {
     summary.notes +=
       ' The hazard was small in the original frame, so it was located by running the model on zoomed regions of the photo.'
   }
 
   return { detections, summary, imageSize: { width: srcW, height: srcH }, tiled }
+}
+
+/** Downloads a photo, runs the trained model on it, and returns detections + a summary. */
+export async function detectInBrowser(imageUrl, ort = globalThis.ort) {
+  const session = await loadSession(ort)
+  const res = await fetch(imageUrl)
+  if (!res.ok) throw new Error('Could not download the photo for analysis')
+  const bitmap = await createImageBitmap(await res.blob())
+  try {
+    return await analyzeBitmap(bitmap, ort, session)
+  } finally {
+    if (bitmap.close) bitmap.close()
+  }
+}
+
+/** Runs the trained model on a photo the citizen has not uploaded yet (a local File). */
+export async function detectInFile(file, ort = globalThis.ort) {
+  const session = await loadSession(ort)
+  const bitmap = await createImageBitmap(file)
+  try {
+    return await analyzeBitmap(bitmap, ort, session)
+  } finally {
+    if (bitmap.close) bitmap.close()
+  }
 }

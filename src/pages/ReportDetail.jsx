@@ -75,6 +75,16 @@ function formatHazardType(type) {
   return type.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
+// Citizens' ML result is written moments after the report row, while an admin's
+// manual Run Detection happens later. Treat a local result created with the
+// report as "analyzed at submission"; a later re-run naturally loses the label.
+function wasAnalyzedAtSubmission(detection, report) {
+  if (!detection || !report?.created_at || !detection.detected_at) return false
+  if (detection.detection_source !== 'yolov8_local') return false
+  const gapMs = Math.abs(new Date(detection.detected_at).getTime() - new Date(report.created_at).getTime())
+  return Number.isFinite(gapMs) && gapMs < 30 * 60 * 1000
+}
+
 // Local AI drafts live in localStorage so a temporary Gemini outage never
 // leaves the admin with an empty report card. They are always labelled as
 // local drafts and are removed as soon as a real AI report is saved.
@@ -146,6 +156,7 @@ export default function ReportDetail() {
   // null = follow the automatic default (weak guesses show only when nothing is trusted);
   // a real true/false means the admin has used the switch and that choice wins.
   const [showWeakBoxes, setShowWeakBoxes] = useState(null)
+  const analyzedAtSubmission = wasAnalyzedAtSubmission(detection, report)
 
   async function fetchReport() {
     const { data, error } = await supabase
@@ -1201,15 +1212,22 @@ export default function ReportDetail() {
                 Computer Vision Detection
               </h2>
               <Button
-                variant="primary"
+                variant={detection ? 'secondary' : 'primary'}
                 size="xs"
                 onClick={handleRunDetection}
                 disabled={detecting || reportOutsideCity}
                 title={reportOutsideCity ? 'This report is outside Iligan City' : undefined}
               >
-                {detecting ? 'Analyzing…' : detection ? 'Re-run' : 'Run Detection'}
+                {detecting ? 'Analyzing…' : detection ? 'Re-run (optional)' : 'Run Detection'}
               </Button>
             </div>
+
+            {analyzedAtSubmission && (
+              <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-success">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                AI result is already available — no need to run detection again.
+              </p>
+            )}
 
             {reportOutsideCity && (
               <p className="mt-2 flex items-start gap-1.5 rounded-lg border border-danger/20 bg-danger-light/50 px-2.5 py-2 text-xs text-danger">
@@ -1228,6 +1246,7 @@ export default function ReportDetail() {
                     {severityLabel(detection.severity_level)}
                   </span>
                   <Badge tone="neutral">{formatHazardType(detection.hazard_type)}</Badge>
+                  {analyzedAtSubmission && <Badge tone="success">AI analyzed at submission</Badge>}
                   <span className="ml-auto text-xs text-ink-muted">
                     {Number(detection.confidence_score).toFixed(0)}% confidence
                   </span>
