@@ -6,9 +6,11 @@ import { supabase } from '../lib/supabase'
 import { deleteHazardReport } from '../lib/deleteReport'
 import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { latestAssignment } from '../lib/reportStatus'
+import { reportSeverity } from '../lib/severity'
+import { formatPhtDateTime as formatDate } from '../lib/datetime'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
-import { Badge, StatusBadge } from '../components/ui/Badge'
+import { Badge, SeverityBadge, StatusBadge } from '../components/ui/Badge'
 import { buttonClasses } from '../components/ui/buttonStyles'
 import FilterTabs from '../components/ui/FilterTabs'
 import Pagination from '../components/ui/Pagination'
@@ -32,10 +34,6 @@ const STATUS_LABELS = {
 
 const PAGE_SIZE = 8
 
-function formatDate(dateString) {
-  return new Date(dateString).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
 export default function MonitorReports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -50,6 +48,7 @@ export default function MonitorReports() {
       .from('hazard_reports')
       .select(
         '*, reporter:users!hazard_reports_user_id_fkey(username, email), hazard_images(image_url), ' +
+          'hazard_detection_results(severity_level, detected_at), ' +
           'inspector_assignments(assigned_to, assignment_status, assigned_at, inspector:users!inspector_assignments_assigned_to_fkey(username, email))'
       )
       .order('created_at', { ascending: false })
@@ -59,7 +58,7 @@ export default function MonitorReports() {
   }
 
   // Status changes and inspector assignments come from other roles.
-  useLiveRefresh(fetchReports, { tables: ['hazard_reports', 'inspector_assignments'] })
+  useLiveRefresh(fetchReports, { tables: ['hazard_reports', 'inspector_assignments', 'hazard_detection_results'] })
 
   async function handleDelete(report) {
     if (!deleteReason.trim()) {
@@ -170,6 +169,11 @@ export default function MonitorReports() {
           </span>
         )
       },
+    },
+    {
+      key: 'severity',
+      header: 'Severity',
+      render: (report) => <SeverityBadge severity={reportSeverity(report)} />,
     },
     {
       key: 'created',
@@ -286,7 +290,10 @@ export default function MonitorReports() {
                             {formatDate(report.created_at)}
                           </p>
                         </div>
-                        <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
+                          <SeverityBadge severity={reportSeverity(report)} />
+                        </div>
                       </div>
                       <div className="mt-3 flex items-center justify-end gap-2 border-t border-line-soft pt-2.5">
                         <Link

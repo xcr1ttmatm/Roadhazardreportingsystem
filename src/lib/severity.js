@@ -28,3 +28,18 @@ export function severityLabel(value) {
 export function severityColor(value) {
   return SEVERITY_COLORS[normalise(value)] || SEVERITY_COLORS.default
 }
+
+/**
+ * Severity to display for a report. Older rows can have a blank `severity`
+ * column while their saved detection result still has a level, so fall back
+ * to the latest detection rather than showing "Unspecified".
+ */
+export function reportSeverity(report) {
+  if (report?.severity) return report.severity
+  const detections = report?.hazard_detection_results
+  if (!Array.isArray(detections) || detections.length === 0) return null
+  const latest = detections.reduce((a, b) =>
+    new Date(b.detected_at || 0) > new Date(a.detected_at || 0) ? b : a
+  )
+  return latest?.severity_level || null
+}

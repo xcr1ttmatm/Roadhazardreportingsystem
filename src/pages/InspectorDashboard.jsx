@@ -13,10 +13,11 @@ import {
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useLiveRefresh } from '../lib/useLiveRefresh'
+import { reportSeverity } from '../lib/severity'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
 import Card, { CardHeader } from '../components/ui/Card'
-import { StatusBadge } from '../components/ui/Badge'
+import { SeverityBadge, StatusBadge } from '../components/ui/Badge'
 import FilterTabs from '../components/ui/FilterTabs'
 import SearchInput from '../components/ui/SearchInput'
 import EmptyState from '../components/ui/EmptyState'
@@ -47,7 +48,7 @@ export default function InspectorDashboard() {
     if (!user) return
     const { data, error } = await supabase
       .from('inspector_assignments')
-      .select('*, report:hazard_reports!inspector_assignments_report_id_fkey(report_id, title, status, hazard_images(image_url))')
+      .select('*, report:hazard_reports!inspector_assignments_report_id_fkey(report_id, title, status, severity, hazard_images(image_url), hazard_detection_results(severity_level, detected_at))')
       .eq('assigned_to', user.id)
       .order('assigned_at', { ascending: false })
 
@@ -55,7 +56,7 @@ export default function InspectorDashboard() {
     setLoading(false)
   }, [user])
 
-  useLiveRefresh(fetchAssignments, { tables: ['inspector_assignments', 'hazard_reports'] })
+  useLiveRefresh(fetchAssignments, { tables: ['inspector_assignments', 'hazard_reports', 'hazard_detection_results'] })
 
   const counts = assignments.reduce(
     (acc, assignment) => {
@@ -190,7 +191,10 @@ export default function InspectorDashboard() {
                         </div>
                       </div>
 
-                      <StatusBadge status={assignment.assignment_status} />
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <StatusBadge status={assignment.assignment_status} />
+                        <SeverityBadge severity={reportSeverity(assignment.report)} />
+                      </div>
 
                       <ChevronRight className="h-4 w-4 shrink-0 text-ink-muted transition group-hover:translate-x-0.5 group-hover:text-primary" />
                     </Link>

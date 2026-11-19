@@ -9,13 +9,14 @@ import {
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { SEVERITY_COLORS, severityLabel } from '../lib/severity'
+import { formatPhtDateTime as formatDate } from '../lib/datetime'
 import { generateReportPdf } from '../lib/generateReportPdf'
 import { CITY_BOUNDS } from '../lib/mapConfig'
 import { isInsideIligan } from '../lib/geo'
 import ImageLightbox from '../components/ImageLightbox'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
-import { Badge, StatusBadge } from '../components/ui/Badge'
+import { Badge, SeverityBadge, StatusBadge } from '../components/ui/Badge'
 import { Textarea } from '../components/ui/Field'
 import LoadingState from '../components/ui/LoadingState'
 import EmptyState from '../components/ui/EmptyState'
@@ -33,12 +34,6 @@ L.Marker.prototype.options.icon = L.icon({
   popupAnchor: [1, -34],
 })
 
-function formatDate(dateString) {
-  if (!dateString) return '—'
-  return new Date(dateString).toLocaleString('en-PH', {
-    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
-}
 function formatHazardType(type) {
   if (!type) return ''
   return type.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())
@@ -379,6 +374,7 @@ export default function InspectionDetail() {
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <StatusBadge status={report.status} assignmentStatus={assignment?.assignment_status} />
+            <SeverityBadge severity={report.severity ?? detection?.severity_level} />
             <span className="flex items-center gap-1 text-xs text-ink-muted">
               <Calendar className="h-3.5 w-3.5" />
               Submitted {formatDate(report.created_at)}

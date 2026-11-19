@@ -15,11 +15,13 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { latestAssignment } from '../lib/reportStatus'
+import { reportSeverity } from '../lib/severity'
+import { formatPhtDateTime as formatDate } from '../lib/datetime'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
 import Card, { CardHeader } from '../components/ui/Card'
 import { buttonClasses } from '../components/ui/buttonStyles'
-import { StatusBadge } from '../components/ui/Badge'
+import { SeverityBadge, StatusBadge } from '../components/ui/Badge'
 import DataTable from '../components/ui/DataTable'
 import EmptyState from '../components/ui/EmptyState'
 import LoadingState from '../components/ui/LoadingState'
@@ -46,11 +48,6 @@ function buildWeek(rows) {
     }).length
     return { label: day.toLocaleDateString('en-PH', { weekday: 'short' }), value }
   })
-}
-
-function formatDate(dateString) {
-  if (!dateString) return '—'
-  return new Date(dateString).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 export default function AdminDashboard() {
@@ -84,7 +81,7 @@ export default function AdminDashboard() {
     const [recentResult, weekResult] = await Promise.all([
       supabase
         .from('hazard_reports')
-        .select('report_id, title, status, created_at, inspector_assignments(assignment_status, assigned_at)')
+        .select('report_id, title, status, created_at, inspector_assignments(assignment_status, assigned_at), hazard_detection_results(severity_level, detected_at)')
         .order('created_at', { ascending: false })
         .limit(5),
       supabase
@@ -98,7 +95,7 @@ export default function AdminDashboard() {
     setOverviewLoading(false)
   }, [])
 
-  useLiveRefresh(fetchOverview)
+  useLiveRefresh(fetchOverview, { tables: ['hazard_reports', 'inspector_assignments', 'hazard_detection_results'] })
 
   const loading = counts === null
 
@@ -131,6 +128,11 @@ export default function AdminDashboard() {
       key: 'status',
       header: 'Status',
       render: (report) => <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />,
+    },
+    {
+      key: 'severity',
+      header: 'Severity',
+      render: (report) => <SeverityBadge severity={reportSeverity(report)} />,
     },
     {
       key: 'created',
@@ -292,7 +294,10 @@ export default function AdminDashboard() {
                       </p>
                       <p className="mt-0.5 text-[10px] text-ink-muted">{formatDate(report.created_at)}</p>
                     </div>
-                    <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
+                      <SeverityBadge severity={reportSeverity(report)} />
+                    </div>
                   </Link>
                 )}
               />

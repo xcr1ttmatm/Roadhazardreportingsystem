@@ -9,7 +9,7 @@
 --
 -- A narrow SECURITY DEFINER function is used instead of a general UPDATE
 -- policy: a citizen can only change `severity`, only on their own report,
--- and only while it is still pending.
+-- and only while it is still pending or under review.
 -- ---------------------------------------------------------------------------
 
 create or replace function public.set_own_report_severity(p_report_id text, p_severity text)
@@ -27,7 +27,7 @@ begin
      set severity = p_severity
    where report_id::text = p_report_id
      and user_id::text = auth.uid()::text
-     and status = 'pending';
+     and status in ('pending', 'under_review');
 end;
 $$;
 
@@ -53,3 +53,40 @@ using (
       and r.user_id::text = auth.uid()::text
   )
 );
+
+-- ---------------------------------------------------------------------------
+-- Let the reporter read the saved AI detection for their own report. The
+-- submission policy above is INSERT-only, so without this the UI fallback
+-- cannot recover a severity that was never copied onto the report row.
+-- ---------------------------------------------------------------------------
+drop policy if exists "Citizens can view their own report's AI detection"
+on public.hazard_detection_results;
+
+create policy "Citizens can view their own report's AI detection"
+on public.hazard_detection_results
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.hazard_reports r
+    where r.report_id = hazard_detection_results.report_id
+      and r.user_id::text = auth.uid()::text
+  )
+);
+
+-- ---------------------------------------------------------------------------
+-- One-time backfill: reports saved before the severity write was added keep
+-- their saved detection result. Copy its level into the report column so every
+-- role reads the same value. Safe to run more than once.
+-- ---------------------------------------------------------------------------
+update public.hazard_reports r
+   set severity = d.severity_level
+  from (
+    select distinct on (report_id) report_id, severity_level
+    from public.hazard_detection_results
+    where severity_level in ('low', 'moderate', 'severe')
+    order by report_id, detected_at desc
+  ) d
+ where r.report_id = d.report_id
+   and (r.severity is null or btrim(r.severity) = '');

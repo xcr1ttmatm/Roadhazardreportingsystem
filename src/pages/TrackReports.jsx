@@ -4,10 +4,11 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { MapPin, Calendar, ChevronDown, Trash2, ListChecks, FilePlus, AlertTriangle } from 'lucide-react'
 import { hasVerifiedLocation } from '../lib/reportLocation'
-import { severityLabel } from '../lib/severity'
+import { reportSeverity, severityLabel } from '../lib/severity'
 import { deleteHazardReport } from '../lib/deleteReport'
 import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { getReportStatusConfig, latestAssignment } from '../lib/reportStatus'
+import { formatPhtDateTime as formatDate } from '../lib/datetime'
 import ImageLightbox from '../components/ImageLightbox'
 import ReportLocationMap from '../components/map/ReportLocationMap'
 import toast from 'react-hot-toast'
@@ -19,14 +20,6 @@ import { StatusBadge, SeverityBadge } from '../components/ui/Badge'
 import EmptyState from '../components/ui/EmptyState'
 import LoadingState from '../components/ui/LoadingState'
 import Modal from '../components/ui/Modal'
-
-function formatDate(dateString) {
-  return new Date(dateString).toLocaleDateString('en-PH', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
 
 export default function TrackReports() {
   const { user } = useAuth()
@@ -57,7 +50,7 @@ export default function TrackReports() {
     if (!user) return
     const { data, error } = await supabase
       .from('hazard_reports')
-      .select('*, hazard_images(image_id, image_url), inspector_assignments(assignment_status, assigned_at)')
+      .select('*, hazard_images(image_id, image_url), hazard_detection_results(severity_level, detected_at), inspector_assignments(assignment_status, assigned_at)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
@@ -202,10 +195,10 @@ export default function TrackReports() {
                     </span>
                     <span
                       className="flex items-center gap-1.5"
-                      title={`Severity: ${severityLabel(report.severity)}`}
+                      title={`Severity: ${severityLabel(reportSeverity(report))}`}
                     >
                       <span className="text-[9px] font-bold uppercase tracking-wide text-ink-muted">Severity</span>
-                      <SeverityBadge severity={report.severity} />
+                      <SeverityBadge severity={reportSeverity(report)} />
                     </span>
                   </div>
 

@@ -15,6 +15,8 @@ import {
 import { useAuth } from '../lib/AuthContext'
 import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { latestAssignment } from '../lib/reportStatus'
+import { reportSeverity } from '../lib/severity'
+import { formatPhtDateTime as formatDate } from '../lib/datetime'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
@@ -25,11 +27,6 @@ import EmptyState from '../components/ui/EmptyState'
 import LoadingState from '../components/ui/LoadingState'
 import DonutChart from '../components/ui/charts/DonutChart'
 import { cn } from '../components/ui/utils'
-
-function formatDate(dateString) {
-  if (!dateString) return '—'
-  return new Date(dateString).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
-}
 
 const QUICK_ACTIONS = [
   {
@@ -68,7 +65,7 @@ export default function CitizenDashboard() {
     // Additive read-only query used only for the dashboard summary.
     const { data, error } = await supabase
       .from('hazard_reports')
-      .select('report_id, title, status, severity, created_at, inspector_assignments(assignment_status, assigned_at)')
+      .select('report_id, title, status, severity, created_at, hazard_detection_results(severity_level, detected_at), inspector_assignments(assignment_status, assigned_at)')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
@@ -252,7 +249,7 @@ export default function CitizenDashboard() {
                       </span>
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
-                      <SeverityBadge severity={report.severity} />
+                      <SeverityBadge severity={reportSeverity(report)} />
                       <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
                     </span>
                     <ArrowUpRight className="h-4 w-4 shrink-0 text-ink-muted transition group-hover:text-primary" />
