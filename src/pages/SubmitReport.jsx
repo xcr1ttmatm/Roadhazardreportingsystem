@@ -22,7 +22,7 @@ import { supabase } from '../lib/supabase'
 import { detectInFile, toStoredDetections } from '../lib/localDetector'
 import { HAZARD_TYPE_VALUES } from '../lib/hazardTypes'
 import { CITY_CENTER, CITY_BOUNDS, CITY_DEFAULT_ZOOM, CITY_MIN_ZOOM } from '../lib/mapConfig'
-import { isInsideIligan } from '../lib/geo'
+import { isInsideIligan, isOnLand, isValidHazardLocation } from '../lib/geo'
 import { getCurrentLocation, getLocationPermission, locationErrorMessage } from '../lib/geolocation'
 import PageHeader from '../components/ui/PageHeader'
 import BaseTiles from '../components/map/BaseTiles'
@@ -52,9 +52,16 @@ L.Marker.prototype.options.icon = L.icon({
 // inline loading state without touching any other code.
 const FULLPAGE_DETECTION_LOADER = true
 
-function LocationMarker({ position, setPosition, invalid }) {
+function LocationMarker({ position, setPosition, invalid, onInvalid }) {
   useMapEvents({
     click(e) {
+      // A tap in the sea (or outside the city) never moves the pin. Keep the
+      // citizen's previous valid pin so they can adjust it instead of getting
+      // stuck with a report that cannot be submitted.
+      if (!isValidHazardLocation(e.latlng.lat, e.latlng.lng)) {
+        onInvalid(e.latlng)
+        return
+      }
       setPosition(e.latlng)
     },
   })
@@ -118,9 +125,18 @@ export default function SubmitReport() {
   // overwrite a choice the citizen just made while the model was still running.
   const manualTypeRef = useRef(false)
 
-  // True when the current pin is outside the Iligan City service area. Kept
-  // derived (not separate state) so the map, message and button can never drift.
+  // Derived from the pin so the map, message and button can never drift.
   const outsideCity = position ? !isInsideIligan(position.lat, position.lng) : false
+  const inWater = position ? !isOnLand(position.lat, position.lng) : false
+  const invalidLocation = outsideCity || inWater
+
+  function warnInvalidPin(latlng) {
+    if (!isOnLand(latlng.lat, latlng.lng)) {
+      toast.error('That spot is in the water. Tap on land inside Iligan City to place the pin.')
+    } else {
+      toast.error('Reports are only accepted within Iligan City. Move the pin inside the blue boundary.')
+    }
+  }
 
   const MAX_IMAGES = 5
 
@@ -267,17 +283,15 @@ export default function SubmitReport() {
       return
     }
     const next = { lat: result.lat, lng: result.lng }
-    // Always drop the pin, even when the fix lands just outside the boundary -
-    // phone GPS can be off by a few hundred metres near the city edge, and
-    // refusing outright leaves the user stuck. The map shows the red "outside
-    // Iligan" warning and submission stays blocked until the pin is moved in.
+    // A GPS fix can drift into the bay near the coast. Reject it like a bad tap
+    // and keep the previous pin so the citizen can place it on land manually.
+    if (!isValidHazardLocation(next.lat, next.lng)) {
+      setLocating(false)
+      warnInvalidPin(next)
+      return
+    }
     setPosition(next)
     setLocating(false)
-    if (!isInsideIligan(next.lat, next.lng)) {
-      toast.error(
-        'Your location appears to be outside Iligan City. Drag the pin inside the blue boundary - reports are only accepted within Iligan City.'
-      )
-    }
   }
 
   // Validates the form, then asks for confirmation. Nothing is written to
@@ -292,8 +306,8 @@ export default function SubmitReport() {
     if (!title) return toast.error('Please select what you are reporting')
     if (!description.trim()) return toast.error('Please describe the hazard')
     if (!position) return toast.error('Please pin the hazard location on the map')
-    if (!isInsideIligan(position.lat, position.lng)) {
-      return toast.error('Reports are only accepted for locations within Iligan City. Move the pin inside the blue boundary.')
+    if (!isValidHazardLocation(position.lat, position.lng)) {
+      return toast.error('Reports are only accepted for land locations within Iligan City. Move the pin to a valid spot.')
     }
     if (imageFiles.length === 0) return toast.error('Please upload at least one photo of the hazard')
 
@@ -308,11 +322,11 @@ export default function SubmitReport() {
 
   async function confirmSubmit() {
     if (submitting) return
-    // The pin cannot move behind the dialog, but never let an out-of-city point
-    // through if this is ever called from somewhere else.
-    if (!position || !isInsideIligan(position.lat, position.lng)) {
+    // The pin cannot move behind the dialog, but never let a water or
+    // out-of-city point through if this is ever called from somewhere else.
+    if (!position || !isValidHazardLocation(position.lat, position.lng)) {
       setConfirmOpen(false)
-      return toast.error('Reports are only accepted for locations within Iligan City. Move the pin inside the blue boundary.')
+      return toast.error('Reports are only accepted for land locations within Iligan City. Move the pin to a valid spot.')
     }
 
     setSubmitting(true)
@@ -633,7 +647,7 @@ export default function SubmitReport() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <CardHeader
               title="Hazard location"
-              description="Tap inside the blue Iligan City boundary to place the pin."
+              description="Tap on land inside the blue Iligan City boundary to place the pin."
               icon={MapPin}
             />
             <button
@@ -658,36 +672,46 @@ export default function SubmitReport() {
             >
               <BaseTiles />
               <CoverageBoundary />
-              <LocationMarker position={position} setPosition={setPosition} invalid={outsideCity} />
+              <LocationMarker
+                position={position}
+                setPosition={setPosition}
+                invalid={invalidLocation}
+                onInvalid={warnInvalidPin}
+              />
               <FlyToPosition position={position} />
             </MapContainer>
           </div>
 
           <div
-            role={outsideCity ? 'alert' : undefined}
+            role={invalidLocation ? 'alert' : undefined}
             aria-live="polite"
             className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs ${
-              outsideCity ? 'border border-danger/20 bg-danger-light/60' : 'bg-canvas/70'
+              invalidLocation ? 'border border-danger/20 bg-danger-light/60' : 'bg-canvas/70'
             }`}
           >
-            {outsideCity ? (
+            {invalidLocation ? (
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-danger" />
             ) : (
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
             )}
-            <span className={outsideCity ? 'text-danger' : 'text-ink-soft'}>
+            <span className={invalidLocation ? 'text-danger' : 'text-ink-soft'}>
               {outsideCity ? (
                 <>
                   <strong className="font-semibold">Outside Iligan City.</strong> Reports are only accepted
                   within Iligan City. Move the pin inside the blue boundary.
                 </>
+              ) : inWater ? (
+                <>
+                  <strong className="font-semibold">Pin is in the water.</strong> Move it onto land inside
+                  Iligan City before submitting.
+                </>
               ) : position ? (
                 <>
                   Pinned: {position.lat.toFixed(5)}, {position.lng.toFixed(5)}{' '}
-                  <span className="font-medium text-success">· within Iligan City</span>
+                  <span className="font-medium text-success">· on land in Iligan City</span>
                 </>
               ) : (
-                'Tap or click inside the blue Iligan City boundary to pin the hazard location.'
+                'Tap or click on land inside the blue Iligan City boundary to pin the hazard location.'
               )}
             </span>
           </div>
@@ -696,9 +720,9 @@ export default function SubmitReport() {
         {/* Submit */}
         <div className="xl:col-span-2">
           <Card className="flex flex-col items-start justify-between gap-3 p-4 sm:flex-row sm:items-center">
-            <p className={`text-xs ${outsideCity ? 'font-medium text-danger' : 'text-ink-soft'}`}>
-              {outsideCity
-                ? 'This pin is outside Iligan City. Move it inside the blue boundary before submitting.'
+            <p className={`text-xs ${invalidLocation ? 'font-medium text-danger' : 'text-ink-soft'}`}>
+              {invalidLocation
+                ? 'This pin is not on land inside Iligan City. Move it to a valid spot before submitting.'
                 : 'By submitting, you confirm the details are accurate to the best of your knowledge.'}
             </p>
             <Button
@@ -706,12 +730,12 @@ export default function SubmitReport() {
               variant="gradient"
               size="lg"
               loading={submitting}
-              disabled={outsideCity || detecting}
+              disabled={invalidLocation || detecting}
               title={
                 detecting
                   ? 'Please wait for the AI analysis to finish'
-                  : outsideCity
-                    ? 'Reports are only accepted within Iligan City'
+                  : invalidLocation
+                    ? 'Reports are only accepted for land locations within Iligan City'
                     : undefined
               }
               iconRight={submitting ? undefined : Send}
@@ -780,7 +804,11 @@ export default function SubmitReport() {
                   {position ? `${position.lat.toFixed(5)}, ${position.lng.toFixed(5)}` : 'No pin set'}
                 </p>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-ink-soft">
-                  {outsideCity ? 'Outside Iligan City.' : 'Within Iligan City.'}
+                  {invalidLocation
+                    ? inWater
+                      ? 'In the water — move the pin onto land.'
+                      : 'Outside Iligan City.'
+                    : 'On land in Iligan City.'}
                 </p>
               </div>
             </div>

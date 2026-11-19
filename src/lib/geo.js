@@ -2,6 +2,7 @@
 // Small location helpers for the Hazard Map. No browser code in here, so it can be tested on its own.
 import { getDisplayPosition } from './reportLocation'
 import { ILIGAN_BOUNDARY, ILIGAN_BBOX } from './iliganBoundary'
+import { ILIGAN_COASTLINE } from './iliganLand'
 
 const EARTH_RADIUS_M = 6371000
 
@@ -52,6 +53,42 @@ export function isInsideIligan(lat, lng) {
       ringContains(latitude, longitude, polygon[0]) &&
       !polygon.slice(1).some((hole) => ringContains(latitude, longitude, hole))
   )
+}
+
+/**
+ * True when a coordinate is on land, not in the sea.
+ *
+ * Casts a vertical ray and tests the nearest OSM coastline crossing. OSM
+ * directs coastline ways with land on the left, so `dx * (latitude - crossing)`
+ * is positive on the land side. Snapshot data lives in ./iliganLand.js, so this
+ * works offline with no geocoding API. Points beyond the snapshot fall back to
+ * land rather than rejecting a valid inland location near its edge.
+ */
+export function isOnLand(lat, lng) {
+  const latitude = Number(lat)
+  const longitude = Number(lng)
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return false
+
+  let nearest = null
+  for (let i = 0; i < ILIGAN_COASTLINE.length; i += 1) {
+    // Segment endpoints [lng1, lat1, lng2, lat2] in OSM's directed order.
+    const [lng1, lat1, lng2, lat2] = ILIGAN_COASTLINE[i]
+    // Half-open rule: a ray through a shared vertex is counted exactly once.
+    if ((lng1 > longitude) === (lng2 > longitude)) continue
+    const crossingLat = lat1 + ((longitude - lng1) * (lat2 - lat1)) / (lng2 - lng1)
+    const delta = crossingLat - latitude
+    if (delta === 0) continue
+    const distance = Math.abs(delta)
+    if (nearest && distance >= nearest.distance) continue
+    // Cross product with the vertical ray; > 0 means the left (land) side.
+    nearest = { distance, land: (lng2 - lng1) * -delta > 0 }
+  }
+  return nearest ? nearest.land : true
+}
+
+/** True only for a land point inside Iligan City — the single pin-placement gate. */
+export function isValidHazardLocation(lat, lng) {
+  return isInsideIligan(lat, lng) && isOnLand(lat, lng)
 }
 
 /** Straight-line distance between two lat/lng points, in metres. */
