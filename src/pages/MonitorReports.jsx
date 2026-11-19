@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import { Calendar, User, Trash2, ClipboardList, ArrowUpRight, AlertTriangle } from 'lucide-react'
+import { Calendar, User, UserCheck, UserMinus, Trash2, ClipboardList, ArrowUpRight, AlertTriangle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { deleteHazardReport } from '../lib/deleteReport'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
-import { StatusBadge } from '../components/ui/Badge'
+import { Badge, StatusBadge } from '../components/ui/Badge'
 import { buttonClasses } from '../components/ui/buttonStyles'
 import FilterTabs from '../components/ui/FilterTabs'
 import SearchInput from '../components/ui/SearchInput'
@@ -35,6 +35,15 @@ function formatDate(dateString) {
   return new Date(dateString).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+/** The newest assignment wins, so a reassigned report shows its current inspector. */
+function latestAssignment(report) {
+  const assignments = report.inspector_assignments || []
+  if (assignments.length === 0) return null
+  return assignments.reduce((newest, current) =>
+    new Date(current.assigned_at || 0) > new Date(newest.assigned_at || 0) ? current : newest
+  )
+}
+
 export default function MonitorReports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -48,7 +57,10 @@ export default function MonitorReports() {
   async function fetchReports() {
     const { data, error } = await supabase
       .from('hazard_reports')
-      .select('*, reporter:users!hazard_reports_user_id_fkey(username, email), hazard_images(image_url)')
+      .select(
+        '*, reporter:users!hazard_reports_user_id_fkey(username, email), hazard_images(image_url), ' +
+          'inspector_assignments(assigned_to, assignment_status, assigned_at, inspector:users!inspector_assignments_assigned_to_fkey(username, email))'
+      )
       .order('created_at', { ascending: false })
 
     if (!error) setReports(data)
@@ -99,7 +111,13 @@ export default function MonitorReports() {
   const searchTerm = query.trim().toLowerCase()
   const searched = searchTerm
     ? byStatus.filter((report) => {
-        const haystack = [report.title, report.description, report.reporter?.username, report.reporter?.email]
+        const haystack = [
+          report.title,
+          report.description,
+          report.reporter?.username,
+          report.reporter?.email,
+          latestAssignment(report)?.inspector?.username,
+        ]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -153,6 +171,31 @@ export default function MonitorReports() {
           {report.reporter?.username ?? 'Unknown'}
         </span>
       ),
+    },
+    {
+      key: 'assigned',
+      header: 'Assigned Inspector',
+      render: (report) => {
+        const assignment = latestAssignment(report)
+        if (!assignment) {
+          return (
+            <Badge tone="neutral" className="whitespace-nowrap">
+              <UserMinus className="h-3 w-3" />
+              Not Assigned
+            </Badge>
+          )
+        }
+        const inspector = assignment.inspector?.username || 'Unknown inspector'
+        return (
+          <span className="flex items-center gap-1.5 whitespace-nowrap text-xs text-ink-soft">
+            <UserCheck className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="max-w-[110px] truncate font-semibold text-ink" title={inspector}>
+              {inspector}
+            </span>
+            <StatusBadge status={assignment.assignment_status} className="px-1.5 py-0.5 text-[10px]" />
+          </span>
+        )
+      },
     },
     {
       key: 'created',

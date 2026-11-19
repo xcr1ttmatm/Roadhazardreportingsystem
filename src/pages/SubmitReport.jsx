@@ -34,6 +34,7 @@ import Modal from '../components/ui/Modal'
 import HazardTypePicker from '../components/HazardTypePicker'
 import DetectionBoxes, { DetectionPreview } from '../components/DetectionBoxes'
 import ImageLightbox from '../components/ImageLightbox'
+import DetectionLoadingOverlay from '../components/DetectionLoadingOverlay'
 import { buildAnnotatedImage, effectiveShowWeak } from '../lib/detectionResult'
 
 // Fix Leaflet's default marker icon, which breaks under Vite's bundling by default
@@ -46,6 +47,10 @@ L.Marker.prototype.options.icon = L.icon({
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
 })
+
+// Try the blocking full-screen loader. Set to false to restore the previous
+// inline loading state without touching any other code.
+const FULLPAGE_DETECTION_LOADER = true
 
 function LocationMarker({ position, setPosition, invalid }) {
   useMapEvents({
@@ -590,6 +595,17 @@ export default function SubmitReport() {
             )}
           </div>
 
+          {mlResult && (
+            <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-ink-muted">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                The model only recognizes potholes, cracks, debris and scouring. If the highlighted boxes are on
+                something else — hair, teeth, clothing or anything not a road hazard — choose the correct type yourself
+                below.
+              </span>
+            </p>
+          )}
+
           <div className="mt-4">
             <HazardTypePicker value={title} onChange={handleTypeChange} disabled={detecting} />
           </div>
@@ -804,10 +820,16 @@ export default function SubmitReport() {
       >
         <div className="flex items-start gap-2.5 rounded-xl bg-primary-light/40 p-3">
           <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-          <p className="text-xs leading-relaxed text-ink-soft">
-            The AI result is only a suggestion. If the photo clearly shows {pendingType}, keep your choice — an LGU
-            admin will review the report either way.
-          </p>
+          <div className="min-w-0">
+            <p className="text-xs leading-relaxed text-ink-soft">
+              The AI result is only a suggestion. If the photo clearly shows {pendingType}, keep your choice — an LGU
+              admin will review the report either way.
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-muted">
+              The model only recognizes road damage — if its boxes are on something else (hair, teeth, clothing), keep
+              your own choice.
+            </p>
+          </div>
         </div>
       </Modal>
 
@@ -826,6 +848,10 @@ export default function SubmitReport() {
             ) : null
           }
         />
+      )}
+
+      {FULLPAGE_DETECTION_LOADER && (
+        <DetectionLoadingOverlay open={detecting} imageUrl={imagePreviews[0]} />
       )}
     </div>
   )

@@ -756,19 +756,6 @@ export default function ReportDetail() {
             {report.title || 'Untitled hazard report'}
           </h1>
         </div>
-        <div className="flex items-center gap-2">
-          {report.ai_report && (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={Download}
-              onClick={handleDownloadPdf}
-              disabled={downloadingPdf}
-            >
-              {downloadingPdf ? 'Preparing…' : 'Download PDF'}
-            </Button>
-          )}
-        </div>
       </div>
 
       {/* Decision */}
@@ -1118,20 +1105,33 @@ export default function ReportDetail() {
 
           {/* AI-Assisted Report */}
           <Card className="order-6 p-5">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <h2 className={sectionTitle}>
                 <Sparkles className="h-4 w-4 text-secondary" />
                 AI-Assisted Report
               </h2>
-              <Button
-                variant="primary"
-                size="xs"
-                onClick={handleGenerateReport}
-                disabled={generating || !detection}
-                title={!detection ? 'Run Computer Vision Detection first' : ''}
-              >
-                {generating ? 'Drafting…' : report.ai_report ? 'Regenerate' : 'Generate'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="primary"
+                  size="xs"
+                  onClick={handleGenerateReport}
+                  disabled={generating || !detection}
+                  title={!detection ? 'Run Computer Vision Detection first' : ''}
+                >
+                  {generating ? 'Drafting…' : report.ai_report ? 'Regenerate' : 'Generate'}
+                </Button>
+                {report.ai_report && (
+                  <Button
+                    variant="secondary"
+                    size="xs"
+                    icon={Download}
+                    onClick={handleDownloadPdf}
+                    disabled={downloadingPdf}
+                  >
+                    {downloadingPdf ? 'Preparing…' : 'Download PDF'}
+                  </Button>
+                )}
+              </div>
             </div>
 
             {generating && (

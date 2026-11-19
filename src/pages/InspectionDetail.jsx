@@ -376,19 +376,6 @@ export default function InspectionDetail() {
             {report.title || 'Untitled hazard report'}
           </h1>
         </div>
-        <div className="flex items-center gap-2">
-          {report.ai_report && (
-            <Button
-              variant="secondary"
-              size="sm"
-              icon={Download}
-              onClick={handleDownloadPdf}
-              disabled={downloadingPdf}
-            >
-              {downloadingPdf ? 'Preparing…' : 'Download PDF'}
-            </Button>
-          )}
-        </div>
       </div>
 
       {/* Assignment status / accept */}
@@ -574,10 +561,21 @@ export default function InspectionDetail() {
 
           {report.ai_report && (
             <Card className="p-5">
-              <h2 className={sectionTitle}>
-                <Sparkles className="h-4 w-4 text-secondary" />
-                AI-Assisted Report
-              </h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className={sectionTitle}>
+                  <Sparkles className="h-4 w-4 text-secondary" />
+                  AI-Assisted Report
+                </h2>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  icon={Download}
+                  onClick={handleDownloadPdf}
+                  disabled={downloadingPdf}
+                >
+                  {downloadingPdf ? 'Preparing…' : 'Download PDF'}
+                </Button>
+              </div>
               <div className="mt-3 space-y-3">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">Executive Summary</p>
