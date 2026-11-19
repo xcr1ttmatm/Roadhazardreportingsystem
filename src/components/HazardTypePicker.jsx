@@ -45,16 +45,21 @@ const TONES = {
  * large tap targets work without extra scripting.
  *
  * `onChange` receives the stored value (Pothole | Debris | Crack | Scouring),
- * which is unchanged from the previous dropdown.
+ * which is unchanged from the previous dropdown. `disabled` locks all cards,
+ * e.g. while the trained model is still analyzing the uploaded photo.
  */
-export default function HazardTypePicker({ value, onChange, name = 'hazard-type' }) {
+export default function HazardTypePicker({ value, onChange, name = 'hazard-type', disabled = false }) {
   return (
-    <fieldset>
+    // A disabled fieldset natively blocks every radio inside it, so a citizen
+    // cannot lock in a type before the trained model has finished analyzing.
+    <fieldset disabled={disabled}>
       <legend className="text-[13px] font-semibold text-ink">
         Hazard Type<span className="ml-0.5 text-danger">*</span>
       </legend>
       <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-        Choose the category that looks closest to what you see.
+        {disabled
+          ? 'Analyzing your photo — these options unlock automatically when it finishes.'
+          : 'Choose the category that looks closest to what you see.'}
       </p>
 
       <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
@@ -69,9 +74,10 @@ export default function HazardTypePicker({ value, onChange, name = 'hazard-type'
               key={type.value}
               htmlFor={optionId}
               className={cn(
-                'group relative flex cursor-pointer gap-3 rounded-xl border border-line bg-white p-3.5 text-left transition',
-                'hover:border-primary/30 hover:bg-canvas/50',
-                'has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-primary/15',
+                'group relative flex gap-3 rounded-xl border border-line bg-white p-3.5 text-left transition',
+                disabled
+                  ? 'cursor-not-allowed opacity-60'
+                  : 'cursor-pointer hover:border-primary/30 hover:bg-canvas/50 has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-primary/15',
                 selected ? cn('ring-4', tone.selected) : 'ring-0'
               )}
             >
@@ -81,6 +87,7 @@ export default function HazardTypePicker({ value, onChange, name = 'hazard-type'
                 name={name}
                 value={type.value}
                 checked={selected}
+                disabled={disabled}
                 onChange={() => onChange(type.value)}
                 className="sr-only"
               />

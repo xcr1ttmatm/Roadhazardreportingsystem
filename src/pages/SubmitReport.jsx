@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Sparkles,
   Check,
+  Loader2,
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -165,7 +166,12 @@ export default function SubmitReport() {
     } catch (err) {
       if (requestId !== detectRequest.current) return
       console.warn('Citizen-side ML detection failed:', err)
-      setDetectError('AI detection is unavailable right now. Please choose a hazard type yourself.')
+      // Surface the real failure reason so the citizen knows what went wrong
+      // instead of seeing a generic "unavailable" message.
+      const reason = typeof err?.message === 'string' && err.message.trim() ? ` (${err.message.trim()})` : ''
+      setDetectError(
+        `AI analysis could not finish${reason}. You can still choose a hazard type yourself, or re-upload the photo to try again.`
+      )
     } finally {
       if (requestId === detectRequest.current) setDetecting(false)
     }
@@ -213,6 +219,9 @@ export default function SubmitReport() {
 
   /** Manual choices win, but a disagreement with the AI is confirmed first. */
   function handleTypeChange(nextType) {
+    // Belt-and-braces: the picker itself is disabled while detecting, but never
+    // let a late click win over the model result even if an event slips through.
+    if (detecting) return
     manualTypeRef.current = true
     if (nextType === title) return
     if (mlSuggestion && nextType !== mlSuggestion) {
@@ -509,15 +518,24 @@ export default function SubmitReport() {
         <Card className="p-5">
           <CardHeader
             title="Hazard type"
-            description="The AI suggestion is selected for you — change it if it is wrong."
+            description={
+              detecting
+                ? 'Please wait for the AI analysis to finish before choosing.'
+                : 'The AI suggestion is selected for you — change it if it is wrong.'
+            }
             icon={Sparkles}
           />
 
           <div aria-live="polite" className="mt-4 rounded-xl border border-line bg-canvas/70 p-3">
             {detecting ? (
-              <p className="flex items-center gap-2 text-xs font-medium text-primary">
-                <Sparkles className="h-4 w-4 animate-pulse" />
-                Analyzing the first photo…
+              <p className="flex items-start gap-2 text-xs font-medium text-primary">
+                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+                <span>
+                  Analyzing your photo with the trained model…
+                  <span className="mt-0.5 block font-normal text-ink-soft">
+                    Please wait — you can choose a hazard type once the analysis finishes.
+                  </span>
+                </span>
               </p>
             ) : mlResult?.summary ? (
               <div className="space-y-1.5">
@@ -549,15 +567,20 @@ export default function SubmitReport() {
                 </p>
                 <p className="text-[11px] text-ink-muted">You can still submit; an LGU admin will review the report.</p>
               </div>
+            ) : detectError ? (
+              <p role="alert" className="flex items-start gap-2 text-xs leading-relaxed text-danger">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{detectError}</span>
+              </p>
             ) : (
               <p className="text-xs leading-relaxed text-ink-soft">
-                {detectError || 'Upload a photo — the first one is analyzed automatically.'}
+                Upload a photo — the first one is analyzed automatically.
               </p>
             )}
           </div>
 
           <div className="mt-4">
-            <HazardTypePicker value={title} onChange={handleTypeChange} />
+            <HazardTypePicker value={title} onChange={handleTypeChange} disabled={detecting} />
           </div>
         </Card>
 
