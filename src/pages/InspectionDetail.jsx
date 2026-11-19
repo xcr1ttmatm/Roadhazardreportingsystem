@@ -119,12 +119,24 @@ export default function InspectionDetail() {
   async function handleAccept() {
     setAccepting(true)
     try {
-      const { error } = await supabase
+      const acceptedAt = new Date().toISOString()
+      const { error: assignError } = await supabase
         .from('inspector_assignments')
-        .update({ assignment_status: 'accepted', accepted_at: new Date().toISOString() })
+        .update({ assignment_status: 'accepted', accepted_at: acceptedAt })
         .eq('assignment_id', assignment.assignment_id)
 
-      if (error) throw error
+      if (assignError) throw assignError
+
+      // Accepting an assignment is what moves a fresh report into review.
+      // Guard the write so a report that is already verified/approved is never
+      // pushed backwards by a late accept.
+      const { error: reportError } = await supabase
+        .from('hazard_reports')
+        .update({ status: 'under_review' })
+        .eq('report_id', reportId)
+        .in('status', ['pending', 'under_review'])
+      if (reportError) throw reportError
+
       toast.success('Assignment accepted')
       await fetchAll()
     } catch (err) {
@@ -366,7 +378,7 @@ export default function InspectionDetail() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <StatusBadge status={report.status} />
+            <StatusBadge status={report.status} assignmentStatus={assignment?.assignment_status} />
             <span className="flex items-center gap-1 text-xs text-ink-muted">
               <Calendar className="h-3.5 w-3.5" />
               Submitted {formatDate(report.created_at)}

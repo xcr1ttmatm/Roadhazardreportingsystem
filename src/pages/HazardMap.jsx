@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { MapContainer, Marker, Popup, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import { Calendar, Eye, EyeOff, LocateFixed, Map as MapIcon, MapPin, ShieldCheck, Wrench, ZoomIn } from 'lucide-react'
@@ -9,6 +9,7 @@ import { countNearbyHazards, isInsideIligan } from '../lib/geo'
 import { SEVERITY_COLORS, severityColor, severityLabel } from '../lib/severity'
 import { getBeforeAfterImages } from '../lib/reportImages'
 import { useMediaQuery } from '../lib/useMediaQuery'
+import { useLiveRefresh } from '../lib/useLiveRefresh'
 import { getDisplayPosition } from '../lib/reportLocation'
 import ImageLightbox from '../components/ImageLightbox'
 import ReportSheet from '../components/map/ReportSheet'
@@ -265,19 +266,18 @@ export default function HazardMap() {
     locStatus === 'timeout' ||
     locStatus === 'unavailable'
 
-  useEffect(() => {
-    async function fetchApprovedReports() {
-      const { data, error } = await supabase
-        .from('hazard_reports')
-        .select('*, hazard_images(image_url), resolved_images(image_url)')
-        .in('status', ['approved', 'resolved'])
+  const fetchApprovedReports = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('hazard_reports')
+      .select('*, hazard_images(image_url), resolved_images(image_url)')
+      .in('status', ['approved', 'resolved'])
 
-      if (!error) setReports(data)
-      setLoading(false)
-    }
-
-    fetchApprovedReports()
+    if (!error) setReports(data)
+    setLoading(false)
   }, [])
+
+  // An admin approval or repair should appear on the public map without a reload.
+  useLiveRefresh(fetchApprovedReports)
 
   return (
     <div className="space-y-6">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Calendar,
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
+import { useLiveRefresh } from '../lib/useLiveRefresh'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
 import Card, { CardHeader } from '../components/ui/Card'
@@ -42,22 +43,19 @@ export default function InspectorDashboard() {
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
 
-  useEffect(() => {
+  const fetchAssignments = useCallback(async () => {
     if (!user) return
+    const { data, error } = await supabase
+      .from('inspector_assignments')
+      .select('*, report:hazard_reports!inspector_assignments_report_id_fkey(report_id, title, status, hazard_images(image_url))')
+      .eq('assigned_to', user.id)
+      .order('assigned_at', { ascending: false })
 
-    async function fetchAssignments() {
-      const { data, error } = await supabase
-        .from('inspector_assignments')
-        .select('*, report:hazard_reports!inspector_assignments_report_id_fkey(report_id, title, status, hazard_images(image_url))')
-        .eq('assigned_to', user.id)
-        .order('assigned_at', { ascending: false })
-
-      if (!error) setAssignments(data)
-      setLoading(false)
-    }
-
-    fetchAssignments()
+    if (!error) setAssignments(data)
+    setLoading(false)
   }, [user])
+
+  useLiveRefresh(fetchAssignments, { tables: ['inspector_assignments', 'hazard_reports'] })
 
   const counts = assignments.reduce(
     (acc, assignment) => {

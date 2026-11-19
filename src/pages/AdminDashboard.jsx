@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ClipboardList,
@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
+import { useLiveRefresh } from '../lib/useLiveRefresh'
+import { latestAssignment } from '../lib/reportStatus'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
 import Card, { CardHeader } from '../components/ui/Card'
@@ -58,11 +60,9 @@ export default function AdminDashboard() {
   const [week, setWeek] = useState([])
   const [overviewLoading, setOverviewLoading] = useState(true)
 
-  useEffect(() => {
-    async function fetchCounts() {
-      const { data, error } = await supabase.from('hazard_reports').select('status')
-      if (error) return
-
+  const fetchOverview = useCallback(async () => {
+    const { data, error } = await supabase.from('hazard_reports').select('status')
+    if (!error) {
       const result = {
         total: data.length,
         pending: 0,
@@ -77,31 +77,28 @@ export default function AdminDashboard() {
       setCounts(result)
     }
 
-    // Additive read-only query for the overview widgets (no API/backend changes).
-    async function fetchOverview() {
-      const weekStart = new Date(startOfDay(new Date()))
-      weekStart.setDate(weekStart.getDate() - 6)
+    // Additive read-only queries for the overview widgets.
+    const weekStart = new Date(startOfDay(new Date()))
+    weekStart.setDate(weekStart.getDate() - 6)
 
-      const [recentResult, weekResult] = await Promise.all([
-        supabase
-          .from('hazard_reports')
-          .select('report_id, title, status, created_at')
-          .order('created_at', { ascending: false })
-          .limit(5),
-        supabase
-          .from('hazard_reports')
-          .select('created_at')
-          .gte('created_at', weekStart.toISOString()),
-      ])
+    const [recentResult, weekResult] = await Promise.all([
+      supabase
+        .from('hazard_reports')
+        .select('report_id, title, status, created_at, inspector_assignments(assignment_status, assigned_at)')
+        .order('created_at', { ascending: false })
+        .limit(5),
+      supabase
+        .from('hazard_reports')
+        .select('created_at')
+        .gte('created_at', weekStart.toISOString()),
+    ])
 
-      if (!recentResult.error) setRecent(recentResult.data ?? [])
-      if (!weekResult.error) setWeek(buildWeek(weekResult.data ?? []))
-      setOverviewLoading(false)
-    }
-
-    fetchCounts()
-    fetchOverview()
+    if (!recentResult.error) setRecent(recentResult.data ?? [])
+    if (!weekResult.error) setWeek(buildWeek(weekResult.data ?? []))
+    setOverviewLoading(false)
   }, [])
+
+  useLiveRefresh(fetchOverview)
 
   const loading = counts === null
 
@@ -133,7 +130,7 @@ export default function AdminDashboard() {
     {
       key: 'status',
       header: 'Status',
-      render: (report) => <StatusBadge status={report.status} />,
+      render: (report) => <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />,
     },
     {
       key: 'created',
@@ -295,7 +292,7 @@ export default function AdminDashboard() {
                       </p>
                       <p className="mt-0.5 text-[10px] text-ink-muted">{formatDate(report.created_at)}</p>
                     </div>
-                    <StatusBadge status={report.status} />
+                    <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
                   </Link>
                 )}
               />

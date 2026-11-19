@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import { Calendar, User, UserCheck, UserMinus, Trash2, ClipboardList, ArrowUpRight, AlertTriangle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { deleteHazardReport } from '../lib/deleteReport'
+import { useLiveRefresh } from '../lib/useLiveRefresh'
+import { latestAssignment } from '../lib/reportStatus'
 import PageHeader from '../components/ui/PageHeader'
 import Card from '../components/ui/Card'
 import { Badge, StatusBadge } from '../components/ui/Badge'
@@ -34,15 +36,6 @@ function formatDate(dateString) {
   return new Date(dateString).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-/** The newest assignment wins, so a reassigned report shows its current inspector. */
-function latestAssignment(report) {
-  const assignments = report.inspector_assignments || []
-  if (assignments.length === 0) return null
-  return assignments.reduce((newest, current) =>
-    new Date(current.assigned_at || 0) > new Date(newest.assigned_at || 0) ? current : newest
-  )
-}
-
 export default function MonitorReports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
@@ -65,9 +58,8 @@ export default function MonitorReports() {
     setLoading(false)
   }
 
-  useEffect(() => {
-    fetchReports()
-  }, [])
+  // Status changes and inspector assignments come from other roles.
+  useLiveRefresh(fetchReports, { tables: ['hazard_reports', 'inspector_assignments'] })
 
   async function handleDelete(report) {
     if (!deleteReason.trim()) {
@@ -192,7 +184,7 @@ export default function MonitorReports() {
     {
       key: 'status',
       header: 'Status',
-      render: (report) => <StatusBadge status={report.status} />,
+      render: (report) => <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />,
     },
     {
       key: 'actions',
@@ -294,7 +286,7 @@ export default function MonitorReports() {
                             {formatDate(report.created_at)}
                           </p>
                         </div>
-                        <StatusBadge status={report.status} />
+                        <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
                       </div>
                       <div className="mt-3 flex items-center justify-end gap-2 border-t border-line-soft pt-2.5">
                         <Link

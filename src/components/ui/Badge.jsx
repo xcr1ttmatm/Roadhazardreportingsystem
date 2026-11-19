@@ -1,4 +1,5 @@
 import { cn } from './utils'
+import { getReportStatusConfig } from '../../lib/reportStatus'
 
 const TONES = {
   neutral: 'bg-slate-100 text-slate-600 ring-slate-200/70',
@@ -37,20 +38,8 @@ export function Badge({ tone = 'neutral', dot = false, className, children }) {
   )
 }
 
-/* Status labels/tone for hazard reports and inspector assignments. */
-const STATUS = {
-  pending: { label: 'Pending', tone: 'neutral' },
-  under_review: { label: 'Under Review', tone: 'blue' },
-  verified: { label: 'Verified', tone: 'indigo' },
-  approved: { label: 'Approved', tone: 'success' },
-  rejected: { label: 'Rejected', tone: 'danger' },
-  resolved: { label: 'Resolved', tone: 'success' },
-  accepted: { label: 'In Progress', tone: 'blue' },
-  completed: { label: 'Completed', tone: 'success' },
-}
-
-export function StatusBadge({ status, className, dot = true }) {
-  const config = STATUS[status] ?? STATUS.pending
+export function StatusBadge({ status, assignmentStatus, className, dot = true }) {
+  const config = getReportStatusConfig(status, assignmentStatus)
   return (
     <Badge tone={config.tone} dot={dot} className={className}>
       {config.label}

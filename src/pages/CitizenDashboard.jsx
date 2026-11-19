@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   FilePlus,
@@ -13,6 +13,8 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
+import { useLiveRefresh } from '../lib/useLiveRefresh'
+import { latestAssignment } from '../lib/reportStatus'
 import { supabase } from '../lib/supabase'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
@@ -61,23 +63,20 @@ export default function CitizenDashboard() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const fetchReports = useCallback(async () => {
     if (!user) return
+    // Additive read-only query used only for the dashboard summary.
+    const { data, error } = await supabase
+      .from('hazard_reports')
+      .select('report_id, title, status, severity, created_at, inspector_assignments(assignment_status, assigned_at)')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
 
-    async function fetchReports() {
-      // Additive read-only query used only for the dashboard summary.
-      const { data, error } = await supabase
-        .from('hazard_reports')
-        .select('report_id, title, status, severity, created_at')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-
-      if (!error) setReports(data ?? [])
-      setLoading(false)
-    }
-
-    fetchReports()
+    if (!error) setReports(data ?? [])
+    setLoading(false)
   }, [user])
+
+  useLiveRefresh(fetchReports, { filter: user ? `user_id=eq.${user.id}` : undefined })
 
   const counts = reports.reduce(
     (acc, report) => {
@@ -254,7 +253,7 @@ export default function CitizenDashboard() {
                     </span>
                     <span className="flex shrink-0 items-center gap-1.5">
                       <SeverityBadge severity={report.severity} />
-                      <StatusBadge status={report.status} />
+                      <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
                     </span>
                     <ArrowUpRight className="h-4 w-4 shrink-0 text-ink-muted transition group-hover:text-primary" />
                   </Link>

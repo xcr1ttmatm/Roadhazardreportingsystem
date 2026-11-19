@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { MapPin, Calendar, ChevronDown, Trash2, ListChecks, FilePlus, AlertTriangle } from 'lucide-react'
 import { hasVerifiedLocation } from '../lib/reportLocation'
+import { severityLabel } from '../lib/severity'
 import { deleteHazardReport } from '../lib/deleteReport'
+import { useLiveRefresh } from '../lib/useLiveRefresh'
+import { getReportStatusConfig, latestAssignment } from '../lib/reportStatus'
 import ImageLightbox from '../components/ImageLightbox'
 import ReportLocationMap from '../components/map/ReportLocationMap'
 import toast from 'react-hot-toast'
@@ -50,22 +53,20 @@ export default function TrackReports() {
     }
   }
 
-  useEffect(() => {
+  const fetchReports = useCallback(async () => {
     if (!user) return
+    const { data, error } = await supabase
+      .from('hazard_reports')
+      .select('*, hazard_images(image_id, image_url), inspector_assignments(assignment_status, assigned_at)')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
 
-    async function fetchReports() {
-      const { data, error } = await supabase
-        .from('hazard_reports')
-        .select('*, hazard_images(image_id, image_url)')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-
-      if (!error) setReports(data)
-      setLoading(false)
-    }
-
-    fetchReports()
+    if (!error) setReports(data)
+    setLoading(false)
   }, [user])
+
+  // Admin/inspector decisions must show up here without a manual reload.
+  useLiveRefresh(fetchReports, { filter: user ? `user_id=eq.${user.id}` : undefined })
 
   // Once the report list is available, drop ?report= so a refresh or back
   // navigation doesn't re-trigger the jump. If the id isn't in the citizen's
@@ -191,9 +192,21 @@ export default function TrackReports() {
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 flex-col items-end gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-                    <StatusBadge status={report.status} />
-                    <SeverityBadge severity={report.severity} />
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span
+                      className="flex items-center gap-1.5"
+                      title={`Status: ${getReportStatusConfig(report.status, latestAssignment(report)?.assignment_status).label}`}
+                    >
+                      <span className="text-[9px] font-bold uppercase tracking-wide text-ink-muted">Status</span>
+                      <StatusBadge status={report.status} assignmentStatus={latestAssignment(report)?.assignment_status} />
+                    </span>
+                    <span
+                      className="flex items-center gap-1.5"
+                      title={`Severity: ${severityLabel(report.severity)}`}
+                    >
+                      <span className="text-[9px] font-bold uppercase tracking-wide text-ink-muted">Severity</span>
+                      <SeverityBadge severity={report.severity} />
+                    </span>
                   </div>
 
                   <ChevronDown

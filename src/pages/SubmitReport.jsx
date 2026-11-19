@@ -358,6 +358,7 @@ export default function SubmitReport() {
           description: description.trim(),
           latitude: position.lat,
           longitude: position.lng,
+          status: 'pending',
         })
         .select()
         .single()
@@ -433,6 +434,16 @@ export default function SubmitReport() {
         if (detectionError) {
           detectionSaveFailed = true
           console.warn('AI result could not be saved with the report:', detectionError)
+        } else if (summary?.severityLevel) {
+          // The citizen-side result is the source of truth at submission. Persist
+          // its severity on the report too, otherwise My Reports shows a blank
+          // "Unspecified" severity until an admin re-runs detection. The RPC is
+          // restricted to the reporter's own pending report (see the SQL file).
+          const { error: severityError } = await supabase.rpc('set_own_report_severity', {
+            p_report_id: report.report_id,
+            p_severity: summary.severityLevel,
+          })
+          if (severityError) console.warn('Report severity could not be saved:', severityError)
         }
       }
 
