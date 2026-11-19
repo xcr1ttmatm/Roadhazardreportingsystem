@@ -306,12 +306,27 @@ export default function ReportDetail() {
               longitude: report.longitude,
               reporterUsername: report.reporter?.username,
             },
-            // Never let a stalled request hang the page for minutes.
-            timeout: 60_000,
+            // The Edge Function caps its own upstream work at ~31s. This
+            // client timeout leaves a small buffer without a stuck spinner.
+            timeout: 45_000,
           }),
-        // No automatic retry: if it fails, show the local draft immediately
-        // instead of doubling the wait with a second attempt.
-        { attempts: 1 }
+        {
+          // One retry gives a transient 503/429 a fair second chance without
+          // turning a brief outage into a long chain of attempts.
+          attempts: 2,
+          delayMs: 900,
+          onRetry: async () => {
+            // A timed-out call may have saved its result right before the
+            // timeout. Re-read the row so we don't regenerate unnecessarily.
+            const saved = await fetchReport()
+            const savedReport = saved?.ai_report
+            return !(
+              savedReport &&
+              savedReport.generated_by !== 'local_fallback' &&
+              saved.ai_report_generated_at !== previousGeneratedAt
+            )
+          },
+        }
       )
 
       if (error) throw new Error(friendlyError || 'Report generation failed')
@@ -346,9 +361,10 @@ export default function ReportDetail() {
         ai_report_generated_at: draft.generated_at,
       }))
 
-      toast.success('Local draft ready — the AI was unavailable, so this draft uses the report data.', {
-        duration: 10000,
-      })
+      toast.error(
+        'AI report generation failed after retrying. A local draft was built from the report data — click Regenerate to try again.',
+        { duration: 12000 }
+      )
     } finally {
       setGenerating(false)
     }
@@ -1132,7 +1148,7 @@ export default function ReportDetail() {
             {generating && (
               <div className="mt-3 flex items-center gap-2 text-xs text-ink-soft">
                 <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-primary" />
-                Drafting… {generateSeconds}s elapsed (usually under 15 seconds).
+                Drafting… {generateSeconds}s elapsed (usually under 30 seconds; retrying once if needed).
               </div>
             )}
 
