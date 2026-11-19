@@ -203,7 +203,7 @@ export default function TrackReports() {
 
                 {isExpanded && (
                   <div className="border-t border-line-soft px-3.5 pb-4 pt-4 sm:px-4">
-                    <p className="text-sm leading-relaxed text-ink-soft">{report.description}</p>
+                    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-soft">{report.description}</p>
 
                     {photos.length > 0 && (
                       <div className="mt-4">

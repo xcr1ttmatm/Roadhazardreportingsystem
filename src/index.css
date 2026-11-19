@@ -52,6 +52,7 @@
   --animate-scale-in: scale-in 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-slide-in: slide-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
   --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-hazard-scan: hazard-scan 1.8s ease-in-out infinite;
 
   @keyframes fade-up {
     from {
@@ -95,6 +96,15 @@
     }
     to {
       background-position: 200% 0;
+    }
+  }
+  /* Transform-only so the scan stays smooth while WASM inference blocks JS. */
+  @keyframes hazard-scan {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(400%);
     }
   }
 }

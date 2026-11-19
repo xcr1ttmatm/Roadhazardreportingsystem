@@ -378,7 +378,7 @@ export default function HazardMap() {
                     <p className="text-sm font-semibold text-ink">
                       {report.title || 'Road hazard'}
                     </p>
-                    <p className="mt-1 line-clamp-3 text-xs text-ink-soft">{report.description}</p>
+                    <p className="mt-1 line-clamp-3 whitespace-pre-line text-xs text-ink-soft">{report.description}</p>
                     {report.status === 'resolved' ? (
                       <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-semibold text-white">
                         <Wrench className="h-2.5 w-2.5" />

@@ -745,7 +745,7 @@ export default function SubmitReport() {
         <div className="space-y-3">
           <div className="rounded-xl border border-line bg-canvas/60 p-3.5">
             <p className="text-sm font-semibold text-ink">{title || 'Road hazard'}</p>
-            <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-ink-soft">{description.trim()}</p>
+            <p className="mt-1 line-clamp-3 whitespace-pre-line text-xs leading-relaxed text-ink-soft">{description.trim()}</p>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2">

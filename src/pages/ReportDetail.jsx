@@ -1077,7 +1077,7 @@ export default function ReportDetail() {
                 </div>
               </div>
             ) : (
-              <p className="mt-2 text-sm leading-relaxed text-ink-soft">{report.description}</p>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-soft">{report.description}</p>
             )}
           </Card>
 

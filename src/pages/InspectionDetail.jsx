@@ -523,7 +523,7 @@ export default function InspectionDetail() {
 
           <Card className="p-5">
             <h2 className={sectionTitle}>Citizen's Description</h2>
-            <p className="mt-2 text-sm leading-relaxed text-ink-soft">{report.description}</p>
+            <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-soft">{report.description}</p>
           </Card>
 
           <Card className="p-5">

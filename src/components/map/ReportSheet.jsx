@@ -149,7 +149,7 @@ export default function ReportSheet({ report, onClose, onOpenLightbox }) {
         </div>
 
         {report.description && (
-          <p className="whitespace-pre-line text-sm leading-relaxed text-ink-soft">{report.description}</p>
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-soft">{report.description}</p>
         )}
       </div>
     </Modal>
