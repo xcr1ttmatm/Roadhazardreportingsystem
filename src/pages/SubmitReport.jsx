@@ -236,6 +236,17 @@ export default function SubmitReport() {
     setPendingType(null)
   }
 
+  /**
+   * Restore the model's type instead of the citizen's. Needed when an override
+   * was already confirmed earlier — in that case `title` holds their previous
+   * manual choice, so merely closing the dialog would not bring back the AI.
+   */
+  function keepAiResult() {
+    if (mlSuggestion) setTitle(mlSuggestion)
+    manualTypeRef.current = false
+    setPendingType(null)
+  }
+
   async function handleUseCurrentLocation() {
     setLocating(true)
     const result = await getCurrentLocation()
@@ -768,12 +779,11 @@ export default function SubmitReport() {
         </div>
       </Modal>
 
-      {/* Shown only when the citizen actively picks a card that disagrees with
-          the AI. The form value has NOT changed yet, so closing this dialog
-          simply keeps the ML suggestion. */}
+      {/* Shown when the citizen picks a card that disagrees with the AI.
+          Closing it (button, backdrop, Escape or X) restores the AI type. */}
       <Modal
         open={Boolean(pendingType)}
-        onClose={() => setPendingType(null)}
+        onClose={keepAiResult}
         title="Change the hazard type?"
         description={`The AI detected ${mlSuggestion || 'a different type'} from your first photo. Are you sure you want to use ${pendingType} instead?`}
         size="sm"
@@ -781,7 +791,7 @@ export default function SubmitReport() {
           <>
             <Button
               variant="secondary"
-              onClick={() => setPendingType(null)}
+              onClick={keepAiResult}
               autoFocus
             >
               Keep AI result
