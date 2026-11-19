@@ -9,7 +9,6 @@ import Card from '../components/ui/Card'
 import { Badge, StatusBadge } from '../components/ui/Badge'
 import { buttonClasses } from '../components/ui/buttonStyles'
 import FilterTabs from '../components/ui/FilterTabs'
-import SearchInput from '../components/ui/SearchInput'
 import Pagination from '../components/ui/Pagination'
 import DataTable from '../components/ui/DataTable'
 import EmptyState from '../components/ui/EmptyState'
@@ -48,7 +47,6 @@ export default function MonitorReports() {
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
-  const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
   const [deleteReason, setDeleteReason] = useState('')
@@ -108,26 +106,10 @@ export default function MonitorReports() {
   }))
 
   const byStatus = filter === 'all' ? reports : reports.filter((r) => r.status === filter)
-  const searchTerm = query.trim().toLowerCase()
-  const searched = searchTerm
-    ? byStatus.filter((report) => {
-        const haystack = [
-          report.title,
-          report.description,
-          report.reporter?.username,
-          report.reporter?.email,
-          latestAssignment(report)?.inspector?.username,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return haystack.includes(searchTerm)
-      })
-    : byStatus
 
-  const pageCount = Math.max(1, Math.ceil(searched.length / PAGE_SIZE))
+  const pageCount = Math.max(1, Math.ceil(byStatus.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
-  const paginated = searched.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  const paginated = byStatus.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   const deleteTarget = reports.find((report) => report.report_id === confirmDeleteId) ?? null
 
@@ -265,27 +247,18 @@ export default function MonitorReports() {
             }}
             className="w-full lg:w-auto"
           />
-          <SearchInput
-            value={query}
-            onChange={(value) => {
-              setQuery(value)
-              setPage(1)
-            }}
-            placeholder="Search reports or reporters…"
-            className="w-full lg:max-w-sm"
-          />
         </div>
 
         <div className="mt-4">
           {loading ? (
             <LoadingState rows={5} label="Loading reports…" />
-          ) : searched.length === 0 ? (
+          ) : byStatus.length === 0 ? (
             <EmptyState
               icon={ClipboardList}
-              title={searchTerm || filter !== 'all' ? 'No matching reports' : 'No reports yet'}
+              title={filter !== 'all' ? 'No matching reports' : 'No reports yet'}
               description={
-                searchTerm || filter !== 'all'
-                  ? 'Try a different search term or clear the status filter.'
+                filter !== 'all'
+                  ? 'Try a different status filter.'
                   : 'Citizen submissions will appear here as soon as they arrive.'
               }
             />
@@ -348,7 +321,7 @@ export default function MonitorReports() {
                 page={currentPage}
                 pageCount={pageCount}
                 onChange={setPage}
-                total={searched.length}
+                total={byStatus.length}
                 pageSize={PAGE_SIZE}
                 className="mt-4"
               />
